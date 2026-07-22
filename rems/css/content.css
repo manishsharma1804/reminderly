@@ -1,0 +1,226 @@
+/* Reminderly Content Script Overlays */
+
+/* Pending Reminders Toast Banner */
+#reminderly-pending-banner-root {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 2147483646;
+  font-family: 'Inter', -apple-system, sans-serif;
+  pointer-events: auto;
+  animation: bannerSlideIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+@keyframes bannerSlideIn {
+  0% { transform: translateY(-50px); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+
+.reminderly-pending-card {
+  background: rgba(15, 23, 42, 0.94);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4), 0 0 20px rgba(99, 102, 241, 0.25);
+  border-radius: 14px;
+  padding: 12px 18px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  color: #ffffff;
+}
+
+.reminderly-pending-icon {
+  font-size: 1.5rem;
+}
+
+.reminderly-pending-text {
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.reminderly-pending-sub {
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.reminderly-banner-btn {
+  padding: 6px 12px;
+  font-size: 0.775rem;
+  font-weight: 700;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  background: linear-gradient(135deg, #6366f1 0%, #06b6d4 100%);
+  color: #ffffff;
+  transition: all 0.2s ease;
+}
+
+.reminderly-banner-btn:hover {
+  transform: scale(1.04);
+}
+
+.reminderly-banner-close {
+  background: transparent;
+  border: none;
+  color: #64748b;
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+
+.reminderly-banner-close:hover {
+  color: #ffffff;
+}
+
+/* Glassmorphic Website Blocker Full Page Overlay */
+#reminderly-blocker-root {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 2147483647 !important;
+  transform: translateZ(999999px) !important;
+  isolation: isolate;
+  background: rgba(8, 12, 22, 0.95);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Inter', -apple-system, sans-serif;
+  color: #f8fafc;
+  animation: blockerFadeIn 0.3s ease-out forwards;
+}
+
+@keyframes blockerFadeIn {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+.blocker-modal {
+  width: 90%;
+  max-width: 480px;
+  background: rgba(17, 24, 39, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6), 0 0 30px rgba(99, 102, 241, 0.2);
+  border-radius: 24px;
+  padding: 36px 32px;
+  text-align: center;
+  position: relative;
+}
+
+.blocker-icon-badge {
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 20px auto;
+  border-radius: 50%;
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2.2rem;
+  box-shadow: 0 0 20px rgba(239, 68, 68, 0.3);
+}
+
+.blocker-title {
+  font-family: 'Outfit', sans-serif;
+  font-size: 1.75rem;
+  font-weight: 800;
+  margin-bottom: 8px;
+  background: linear-gradient(135deg, #ffffff 0%, #94a3b8 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.blocker-subtitle {
+  font-size: 0.95rem;
+  color: #94a3b8;
+  margin-bottom: 28px;
+  line-height: 1.5;
+}
+
+.blocker-site-pill {
+  color: #38bdf8;
+  font-weight: 700;
+  background: rgba(56, 189, 248, 0.12);
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+
+.blocker-actions-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.blocker-btn {
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-weight: 700;
+  font-size: 0.875rem;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.blocker-btn-back {
+  grid-column: span 2;
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  color: #ffffff;
+  box-shadow: 0 8px 20px rgba(99, 102, 241, 0.4);
+}
+
+.blocker-btn-back:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 28px rgba(99, 102, 241, 0.6);
+}
+
+.blocker-btn-temp {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f8fafc;
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.blocker-btn-temp:hover {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(99, 102, 241, 0.4);
+}
+
+/* Blocker Light Mode Support */
+#reminderly-blocker-root.theme-light {
+  background: rgba(241, 245, 249, 0.96);
+  color: #0f172a;
+}
+
+#reminderly-blocker-root.theme-light .blocker-modal {
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.15), 0 0 30px rgba(99, 102, 241, 0.1);
+}
+
+#reminderly-blocker-root.theme-light .blocker-title {
+  background: linear-gradient(135deg, #0f172a 0%, #334155 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+#reminderly-blocker-root.theme-light .blocker-subtitle {
+  color: #475569;
+}
+
+#reminderly-blocker-root.theme-light .blocker-site-pill {
+  color: #0284c7;
+  background: rgba(2, 132, 199, 0.1);
+}
+
+#reminderly-blocker-root.theme-light .blocker-btn-temp {
+  background: rgba(0, 0, 0, 0.05);
+  color: #1e293b;
+  border-color: rgba(0, 0, 0, 0.12);
+}
+
+#reminderly-blocker-root.theme-light .blocker-btn-temp:hover {
+  background: rgba(0, 0, 0, 0.1);
+  border-color: rgba(99, 102, 241, 0.4);
+}

@@ -1985,11 +1985,16 @@ function initSettingsAndBackup() {
     soundEngine.playChime(tone, vol);
   });
 
-  // Export JSON
+  // Export JSON (All Data Values)
   document.getElementById('btn-export-backup').addEventListener('click', async () => {
     const backupData = {
       reminders: await storage.getReminders(),
       settings: await storage.getSettings(),
+      archivedReminders: await storage.getArchivedReminders(),
+      customCategories: await storage.getCustomCategories(),
+      dailyStats: await storage.getAllDailyStats(),
+      dailyProgress: await storage.getAllReminderDailyProgress(),
+      focusState: await storage.getFocusState(),
       exportedAt: new Date().toISOString()
     };
 
@@ -2017,6 +2022,11 @@ function initSettingsAndBackup() {
         const imported = JSON.parse(event.target.result);
         if (imported.reminders) await storage.saveReminders(imported.reminders);
         if (imported.settings) await storage.saveSettings(imported.settings);
+        if (imported.archivedReminders) await storage.saveArchivedReminders(imported.archivedReminders);
+        if (imported.customCategories) await storage.saveCustomCategories(imported.customCategories);
+        if (imported.dailyStats) await storage.set(STORAGE_KEYS.DAILY_STATS, imported.dailyStats);
+        if (imported.dailyProgress) await storage.set(STORAGE_KEYS.REMINDER_DAILY_PROGRESS, imported.dailyProgress);
+        if (imported.focusState) await storage.saveFocusState(imported.focusState);
         showToast('Backup restored successfully! Reloading...', 'success');
         window.location.reload();
       } catch (err) {

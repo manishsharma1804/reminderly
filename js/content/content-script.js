@@ -8,6 +8,13 @@
   const { storage } = await import(chrome.runtime.getURL('js/common/storage.js'));
   const { soundEngine } = await import(chrome.runtime.getURL('js/common/audio.js'));
 
+  // Listen for DOM custom event from website landing page to open extension dashboard
+  window.addEventListener('REMINDERLY_OPEN_DASHBOARD', () => {
+    try {
+      chrome.runtime.sendMessage({ action: 'OPEN_DASHBOARD' });
+    } catch (e) { }
+  });
+
   // On page load or refresh, check if active reminders are waiting to be completed/snoozed/skipped!
   try {
     if (document.visibilityState === 'visible') {

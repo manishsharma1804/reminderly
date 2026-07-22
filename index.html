@@ -7,12 +7,21 @@
   <meta name="description" content="Reminderly - The ultimate Chrome reminder & productivity extension with Remi Assistant, Focus Mode, Distracting Site Blocker, Health Hub, and Smart Context Awareness. Remember Smarter | Stay Focused." />
   <meta name="keywords" content="Reminderly, Chrome extension, Remi Assistant, focus mode, website blocker, reminder assistant, productivity dashboard, 20-20-20 eye rest, water tracker, period tracker, chrome reminder extension, remember smarter stay focused" />
   <meta name="author" content="Reminderly Team" />
+  <link rel="canonical" href="https://manishsharma1804.github.io/reminderly/" />
   
   <!-- Open Graph / Facebook -->
   <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://manishsharma1804.github.io/reminderly/" />
   <meta property="og:title" content="Reminderly – Remember Smarter | Stay Focused" />
   <meta property="og:description" content="Transform your browser productivity with Remi Assistant, Focus Mode, Smart Context Queueing, and Health Micro-Breaks. 100% Offline & Private." />
-  <meta property="og:image" content="icons/128x128.png" />
+  <meta property="og:image" content="https://manishsharma1804.github.io/reminderly/icons/128x128.png" />
+
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:url" content="https://manishsharma1804.github.io/reminderly/" />
+  <meta name="twitter:title" content="Reminderly – Remember Smarter | Stay Focused" />
+  <meta name="twitter:description" content="The intelligent Chrome extension that pairs you with Remi Assistant. Queue non-critical tasks during deep work, block distracting sites, and track health micro-breaks." />
+  <meta name="twitter:image" content="https://manishsharma1804.github.io/reminderly/icons/128x128.png" />
 
   <!-- Favicon and App Icons -->
   <link rel="icon" href="icons/transparent.png" type="image/png">
@@ -818,5 +827,14 @@
     </div>
   </footer>
 
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.querySelectorAll('.btn-cta, .btn-hero-primary').forEach(btn => {
+        btn.addEventListener('click', () => {
+          window.dispatchEvent(new CustomEvent('REMINDERLY_OPEN_DASHBOARD'));
+        });
+      });
+    });
+  </script>
 </body>
 </html>

@@ -5,16 +5,16 @@
   "version": "1.0.0",
   "description": "Intelligent, context-aware reminder assistant with Focus Mode, Website Blocker, Remi Assistant, and Analytics Dashboard.",
   "icons": {
-    "16": "icons/transparent.png",
-    "48": "icons/transparent.png",
-    "128": "icons/transparent.png"
+    "16": "icons/16x16.png",
+    "48": "icons/48x48.png",
+    "128": "icons/128x128.png"
   },
   "action": {
     "default_popup": "popup/popup.html",
     "default_icon": {
-      "16": "icons/transparent.png",
-      "48": "icons/transparent.png",
-      "128": "icons/transparent.png"
+      "16": "icons/16x16.png",
+      "48": "icons/48x48.png",
+      "128": "icons/128x128.png"
     },
     "default_title": "Reminderly Dashboard"
   },
