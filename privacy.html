@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Privacy Policy – Reminderly Extension</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Privacy Policy for Reminderly Chrome Extension. 100% Offline & Local Storage. Zero Data Tracking." />
+  <link rel="icon" href="icons/transparent.png" type="image/png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <style>
+    :root {
+      --background: #0f172a;
+      --surface: #1e293b;
+      --surface-elevated: #334155;
+      --text-primary: #f8fafc;
+      --text-secondary: #94a3b8;
+      --primary: #6366f1;
+      --accent: #10b981;
+      --border: rgba(255, 255, 255, 0.1);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background: var(--background);
+      color: var(--text-primary);
+      line-height: 1.7;
+      padding: 3rem 1.5rem;
+    }
+
+    .container {
+      max-width: 860px;
+      margin: 0 auto;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 3rem;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+    }
+
+    .header {
+      margin-bottom: 2.5rem;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 1.5rem;
+    }
+
+    .logo-title {
+      font-size: 2rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, #6366f1 0%, #818cf8 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 4px;
+    }
+
+    .tagline {
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: var(--text-secondary);
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+    }
+
+    .last-updated {
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+      margin-top: 1rem;
+    }
+
+    h2 {
+      font-size: 1.35rem;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin: 2rem 0 1rem 0;
+    }
+
+    p {
+      color: var(--text-secondary);
+      font-size: 0.975rem;
+      margin-bottom: 1rem;
+    }
+
+    ul {
+      color: var(--text-secondary);
+      font-size: 0.95rem;
+      padding-left: 1.5rem;
+      margin-bottom: 1rem;
+    }
+
+    li {
+      margin-bottom: 0.5rem;
+    }
+
+    .highlight-box {
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      border-radius: 12px;
+      padding: 1.25rem;
+      margin: 1.5rem 0;
+    }
+
+    .highlight-box p {
+      color: var(--accent);
+      font-weight: 600;
+      margin: 0;
+    }
+
+    footer {
+      margin-top: 3rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--border);
+      text-align: center;
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+    }
+
+    a {
+      color: var(--primary);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <div class="header">
+      <div class="logo-title">Reminderly</div>
+      <div class="tagline">REMEMBER SMARTER | STAY FOCUSED</div>
+      <div class="last-updated">Effective Date: July 22, 2026</div>
+    </div>
+
+    <div class="highlight-box">
+      <p>🔒 Privacy Summary: Reminderly operates 100% offline and locally on your device. Zero personal data, health data, browsing activity, or telemetry is ever collected, transmitted, or sold.</p>
+    </div>
+
+    <h2>1. Overview</h2>
+    <p>
+      Reminderly ("we", "our", or "the Extension") is committed to protecting user privacy. This Privacy Policy explains how data is handled when you install and use the Reminderly Google Chrome Extension.
+    </p>
+
+    <h2>2. Data Collection and Storage</h2>
+    <p>
+      Reminderly is designed as a **privacy-first, local-only** application. 
+    </p>
+    <ul>
+      <li><strong>No Server Collection:</strong> We do not operate external database servers, tracking API endpoints, or user registration databases.</li>
+      <li><strong>Local Storage (chrome.storage.local):</strong> All user-generated content—including your scheduled reminders, focus session statistics, hydration logs, custom website blocker lists, and optional profile settings (such as age, gender, or menstrual cycle tracking dates)—is saved exclusively inside your web browser's isolated local storage.</li>
+      <li><strong>No Telemetry or Analytics:</strong> We do not track your usage, clicks, browsing behavior, or web visits.</li>
+    </ul>
+
+    <h2>3. Browser Permissions & Purpose</h2>
+    <p>Reminderly requests minimal, necessary Chrome Extension permissions strictly to deliver its core features:</p>
+    <ul>
+      <li><code>storage</code>: Required to save your reminders, preferences, and focus statistics locally on your device.</li>
+      <li><code>alarms</code>: Required to trigger scheduled reminder alerts and wellness break notifications at exact specified times.</li>
+      <li><code>notifications</code>: Required to present native desktop notification banners when Chrome is minimized or on restricted browser pages.</li>
+      <li><code>tabs</code> & <code>activeTab</code>: Required to detect the host domain of your active tab for Smart Context Queueing (holding low-priority reminders while on work sites like Notion or Figma) and for displaying focus blocker overlays on designated distracting sites.</li>
+      <li><code>host_permissions (&lt;all_urls&gt;)</code>: Required to inject content scripts to render Remi floating overlays and focus blocker modals on active web pages.</li>
+    </ul>
+
+    <h2>4. Third-Party Data Sharing</h2>
+    <p>
+      We do not sell, trade, rent, or transfer any data to third parties under any circumstances. Since no data is collected, no user data exists to share with advertisers, analytics providers, or third-party vendors.
+    </p>
+
+    <h2>5. Data Control & Export</h2>
+    <p>
+      You maintain complete control over your data:
+    </p>
+    <ul>
+      <li><strong>Data Backup & Export:</strong> You can export a complete copy of your local data as a JSON file anytime via <em>Settings → Data Backup & Restore</em>.</li>
+      <li><strong>Data Deletion:</strong> You can delete individual reminders, clear history, reset settings to defaults in the extension dashboard, or remove all data instantly by uninstalling the extension or clearing your browser's extension storage.</li>
+    </ul>
+
+    <h2>6. Contact Us</h2>
+    <p>
+      If you have any questions or feedback regarding this Privacy Policy or Reminderly, please contact us at:
+    </p>
+    <p>
+      <strong>Email:</strong> <a href="mailto:contact@manishsharma18.in">contact@manishsharma18.in</a><br />
+      <strong>GitHub Repository:</strong> <a href="index.html">Reminderly Homepage</a>
+    </p>
+
+    <footer>
+      © 2026 Reminderly. All rights reserved. REMEMBER SMARTER | STAY FOCUSED.
+    </footer>
+  </div>
+
+</body>
+</html>

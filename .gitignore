@@ -1,0 +1,11 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# Heavy app archives
+*.zip
+*.app/
+*.dmg
+
+# Backup JSON files
+*_backup_*.json

@@ -1,0 +1,822 @@
+<!DOCTYPE html>
+<html lang="en" itemscope itemtype="http://schema.org/WebPage">
+<head>
+  <meta charset="UTF-8" />
+  <title>Reminderly – Smart Reminder & Productivity Assistant | Remember Smarter | Stay Focused</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
+  <meta name="description" content="Reminderly - The ultimate Chrome reminder & productivity extension with Remi Assistant, Focus Mode, Distracting Site Blocker, Health Hub, and Smart Context Awareness. Remember Smarter | Stay Focused." />
+  <meta name="keywords" content="Reminderly, Chrome extension, Remi Assistant, focus mode, website blocker, reminder assistant, productivity dashboard, 20-20-20 eye rest, water tracker, period tracker, chrome reminder extension, remember smarter stay focused" />
+  <meta name="author" content="Reminderly Team" />
+  
+  <!-- Open Graph / Facebook -->
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Reminderly – Remember Smarter | Stay Focused" />
+  <meta property="og:description" content="Transform your browser productivity with Remi Assistant, Focus Mode, Smart Context Queueing, and Health Micro-Breaks. 100% Offline & Private." />
+  <meta property="og:image" content="icons/128x128.png" />
+
+  <!-- Favicon and App Icons -->
+  <link rel="icon" href="icons/transparent.png" type="image/png">
+  <link rel="apple-touch-icon" href="icons/transparent.png">
+  <meta name="theme-color" content="#6366f1">
+  
+  <!-- Fonts & Icons -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
+
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --primary: #6366f1;
+      --primary-light: #818cf8;
+      --primary-dark: #4f46e5;
+      --secondary: #38bdf8;
+      --accent: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --background: #0f172a;
+      --surface: #1e293b;
+      --surface-elevated: #334155;
+      --text-primary: #f8fafc;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+      --border: rgba(255, 255, 255, 0.1);
+      --border-light: rgba(255, 255, 255, 0.05);
+      --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.2);
+      --shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      --shadow-lg: 0 10px 25px rgba(0, 0, 0, 0.4);
+      --shadow-xl: 0 20px 40px rgba(0, 0, 0, 0.5);
+      --gradient-primary: linear-gradient(135deg, #6366f1 0%, #818cf8 100%);
+      --gradient-accent: linear-gradient(135deg, #38bdf8 0%, #10b981 100%);
+    }
+
+    html {
+      scroll-behavior: smooth;
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background: var(--background);
+      color: var(--text-primary);
+      line-height: 1.6;
+    }
+
+    body {
+      overflow-x: hidden;
+    }
+
+    /* Container */
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 1.5rem;
+    }
+
+    /* Header */
+    header {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border);
+      z-index: 1000;
+      padding: 0.85rem 0;
+    }
+
+    .header-content {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .logo-container {
+      display: flex;
+      flex-direction: column;
+      text-decoration: none;
+    }
+
+    .logo-text {
+      font-size: 1.4rem;
+      font-weight: 800;
+      background: var(--gradient-primary);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: -0.5px;
+      line-height: 1.1;
+    }
+
+    .logo-slogan {
+      font-size: 0.65rem;
+      font-weight: 700;
+      color: var(--text-secondary);
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+    }
+
+    nav {
+      display: flex;
+      gap: 1.75rem;
+      align-items: center;
+    }
+
+    nav a {
+      color: var(--text-secondary);
+      text-decoration: none;
+      font-weight: 500;
+      font-size: 0.9rem;
+      transition: color 0.2s ease;
+    }
+
+    nav a:hover {
+      color: var(--text-primary);
+    }
+
+    .btn-cta {
+      background: var(--gradient-primary);
+      color: white;
+      padding: 0.6rem 1.4rem;
+      border-radius: 50px;
+      font-weight: 600;
+      text-decoration: none;
+      font-size: 0.9rem;
+      box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .btn-cta:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(99, 102, 241, 0.6);
+    }
+
+    /* Hero Section */
+    .hero {
+      padding: 8.5rem 0 5rem 0;
+      text-align: center;
+      position: relative;
+    }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(99, 102, 241, 0.15);
+      border: 1px solid rgba(99, 102, 241, 0.3);
+      padding: 0.35rem 1rem;
+      border-radius: 50px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #818cf8;
+      margin-bottom: 1.5rem;
+    }
+
+    .hero h1 {
+      font-size: clamp(2.4rem, 5vw, 4rem);
+      font-weight: 800;
+      line-height: 1.15;
+      margin-bottom: 1.25rem;
+      letter-spacing: -1px;
+    }
+
+    .gradient-text {
+      background: var(--gradient-primary);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .hero p {
+      font-size: 1.2rem;
+      color: var(--text-secondary);
+      max-width: 760px;
+      margin: 0 auto 2rem auto;
+      line-height: 1.6;
+    }
+
+    .hero-buttons {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-bottom: 2.5rem;
+    }
+
+    .btn-hero-primary {
+      background: var(--gradient-primary);
+      color: white;
+      padding: 0.9rem 2.2rem;
+      border-radius: 50px;
+      font-weight: 700;
+      text-decoration: none;
+      font-size: 1.05rem;
+      box-shadow: 0 8px 25px rgba(99, 102, 241, 0.4);
+      transition: all 0.25s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .btn-hero-primary:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 12px 30px rgba(99, 102, 241, 0.6);
+    }
+
+    .btn-hero-secondary {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-primary);
+      padding: 0.9rem 2.2rem;
+      border-radius: 50px;
+      font-weight: 600;
+      text-decoration: none;
+      font-size: 1.05rem;
+      border: 1px solid var(--border);
+      transition: all 0.25s ease;
+    }
+
+    .btn-hero-secondary:hover {
+      background: rgba(255, 255, 255, 0.1);
+      transform: translateY(-2px);
+    }
+
+    .version-meta {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      font-size: 0.875rem;
+      color: var(--text-muted);
+    }
+
+    .star-rating {
+      color: #f59e0b;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    /* Features Section */
+    .section-title {
+      text-align: center;
+      margin-bottom: 3.5rem;
+    }
+
+    .section-title h2 {
+      font-size: clamp(2rem, 3.5vw, 2.75rem);
+      font-weight: 800;
+      margin-bottom: 0.75rem;
+    }
+
+    .section-title p {
+      color: var(--text-secondary);
+      font-size: 1.1rem;
+      max-width: 650px;
+      margin: 0 auto;
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 1.5rem;
+      margin-bottom: 5rem;
+    }
+
+    .feature-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 2rem;
+      transition: all 0.3s ease;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .feature-card:hover {
+      transform: translateY(-6px);
+      border-color: rgba(99, 102, 241, 0.4);
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+    }
+
+    .feature-icon {
+      font-size: 2.2rem;
+      margin-bottom: 4px;
+    }
+
+    .feature-card h3 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    .feature-card p {
+      color: var(--text-secondary);
+      font-size: 0.95rem;
+      line-height: 1.6;
+    }
+
+    /* Keyboard Shortcuts Section */
+    .shortcuts-section {
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      padding: 5rem 0;
+      margin-bottom: 5rem;
+    }
+
+    .shortcuts-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 1.5rem;
+    }
+
+    .shortcut-card {
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .shortcut-desc {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    kbd {
+      background: var(--surface-elevated);
+      color: var(--primary-light);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 6px;
+      padding: 0.35rem 0.65rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      font-weight: 700;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+    }
+
+    /* Testimonials Section */
+    .testimonials-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 1.5rem;
+      margin-bottom: 5rem;
+    }
+
+    .testimonial-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 2rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .testimonial-quote {
+      font-size: 0.95rem;
+      color: var(--text-secondary);
+      font-style: italic;
+      line-height: 1.65;
+      margin-bottom: 1.5rem;
+    }
+
+    .testimonial-user {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .user-avatar {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: var(--gradient-primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      color: white;
+    }
+
+    .user-info h4 {
+      font-size: 0.95rem;
+      font-weight: 700;
+    }
+
+    .user-info p {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    /* FAQ Accordion Section */
+    .faq-container {
+      max-width: 900px;
+      margin: 0 auto 5rem auto;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .faq-item {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      overflow: hidden;
+      transition: border-color 0.2s ease;
+    }
+
+    .faq-item[open] {
+      border-color: rgba(99, 102, 241, 0.4);
+    }
+
+    .faq-summary {
+      padding: 1.25rem 1.5rem;
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: var(--text-primary);
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      list-style: none;
+    }
+
+    .faq-summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .faq-arrow {
+      color: var(--primary-light);
+      transition: transform 0.2s ease;
+    }
+
+    .faq-item[open] .faq-arrow {
+      transform: rotate(180deg);
+    }
+
+    .faq-body {
+      padding: 0 1.5rem 1.5rem 1.5rem;
+      color: var(--text-secondary);
+      font-size: 0.925rem;
+      line-height: 1.65;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .faq-body code {
+      background: rgba(255, 255, 255, 0.08);
+      color: #38bdf8;
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* Footer */
+    footer {
+      background: rgba(15, 23, 42, 0.95);
+      border-top: 1px solid var(--border);
+      padding: 3.5rem 0 2rem 0;
+      text-align: center;
+    }
+
+    .footer-brand {
+      margin-bottom: 1.5rem;
+    }
+
+    .footer-tagline {
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: var(--text-muted);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      margin-top: 6px;
+    }
+
+    .browser-list {
+      display: flex;
+      justify-content: center;
+      gap: 1.5rem;
+      margin: 1.5rem 0;
+      color: var(--text-secondary);
+      font-size: 0.9rem;
+    }
+
+    .footer-copyright {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-top: 2rem;
+    }
+
+    @media (max-width: 768px) {
+      nav { display: none; }
+      .hero { padding-top: 7rem; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <div class="container header-content">
+      <a href="#" class="logo-container">
+        <div class="logo-text">Reminderly</div>
+        <div class="logo-slogan">Remember Smarter | Stay Focused</div>
+      </a>
+
+      <nav>
+        <a href="#features">Features</a>
+        <a href="#shortcuts">Shortcuts</a>
+        <a href="#faq">FAQ</a>
+        <a href="privacy.html">Privacy Policy</a>
+      </nav>
+
+      <a href="dashboard/dashboard.html" class="btn-cta">Open Dashboard</a>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <section class="hero">
+    <div class="container">
+      <div class="hero-badge">
+        <i class="fa-solid fa-sparkles"></i> Remi Assistant 1.0 Powered
+      </div>
+
+      <h1>
+        Remember Smarter.<br>
+        <span class="gradient-text">Stay Focused.</span>
+      </h1>
+
+      <p>
+        The context-aware Chrome assistant with Remi Assistant, deep work Focus Mode, distracting site blocker, and health micro-breaks. 100% Offline & Private.
+      </p>
+
+      <div class="hero-buttons">
+        <a href="dashboard/dashboard.html" class="btn-hero-primary">
+          <i class="fa-solid fa-rocket"></i> Launch Workspace
+        </a>
+        <a href="#faq" class="btn-hero-secondary">Explore FAQ & Help</a>
+      </div>
+
+      <div class="version-meta">
+        <span><i class="fa-brands fa-apple"></i> macOS & Windows Compatible</span>
+        <span>•</span>
+        <span><i class="fa-solid fa-check-circle" style="color: #10b981;"></i> Manifest V3 Ready</span>
+        <span>•</span>
+        <span class="star-rating">
+          <i class="fa-solid fa-star"></i>
+          <i class="fa-solid fa-star"></i>
+          <i class="fa-solid fa-star"></i>
+          <i class="fa-solid fa-star"></i>
+          <i class="fa-solid fa-star"></i>
+          <strong>5.0 Rating</strong>
+        </span>
+        <span>•</span>
+        <span>100% Offline Storage</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features Section -->
+  <section class="container" id="features" style="padding-top: 2rem;">
+    <div class="section-title">
+      <h2>Built For High-Output Professionals</h2>
+      <p>Everything you need to eliminate digital distraction and stay on top of important health & task deadlines.</p>
+    </div>
+
+    <div class="features-grid">
+      
+      <div class="feature-card">
+        <div class="feature-icon">👦</div>
+        <h3>Remi Assistant</h3>
+        <p>Remi delivers interactive 3-stage animated sequences (Welcome Wave → Idle → Waiting Loop → Outro) directly on your active web pages.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">🧠</div>
+        <h3>Focus Mode & Custom Timers</h3>
+        <p>Preset 25m Pomodoro, 45m deep focus, or custom minute sessions with integrated distracting site blocking.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">⚡</div>
+        <h3>Smart Context Queueing</h3>
+        <p>Low & Medium priority reminders are held silently in the queue while you are active on priority work domains like Notion, Figma, and GitHub.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">🛡️</div>
+        <h3>Distracting Site Blocker</h3>
+        <p>Block distracting websites (YouTube, Reddit, Social Media) with glassmorphic full-page overlays during active focus sessions.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">🏥</div>
+        <h3>Health Hub & Wellness Breaks</h3>
+        <p>Track daily hydration (+1 Glass log), 20-20-20 Eye Rest breaks, Posture Checks, and private Menstrual Cycle predictions.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">🔒</div>
+        <h3>100% Offline & Private</h3>
+        <p>Your reminders, profile, and health data remain strictly on your local browser (chrome.storage.local). Zero telemetry or server calls.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">📦</div>
+        <h3>Auto-Archive Passed Reminders</h3>
+        <p>Passed one-time reminders automatically move to the Archive tab. Restoring repeating reminders recalculates the next future run time.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">📊</div>
+        <h3>Analytics & Active Streaks</h3>
+        <p>Visualize daily completion rates, focus minutes, and keep your daily active streak burning strong.</p>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- Shortcuts Section -->
+  <section class="shortcuts-section" id="shortcuts">
+    <div class="container">
+      <div class="section-title">
+        <h2>⚡ Quick Keyboard Shortcuts</h2>
+        <p>Control Reminderly instantly from anywhere in Google Chrome across macOS & Windows.</p>
+      </div>
+
+      <div class="shortcuts-grid">
+        <div class="shortcut-card">
+          <span class="shortcut-desc">Add New Quick Reminder</span>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <kbd>Alt</kbd> + <kbd>R</kbd>
+            <span style="font-size: 0.8rem; color: var(--text-muted);">or</span>
+            <kbd>⌥ Option</kbd> + <kbd>R</kbd>
+          </div>
+        </div>
+        <div class="shortcut-card">
+          <span class="shortcut-desc">Start / Toggle Focus Session</span>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <kbd>Alt</kbd> + <kbd>F</kbd>
+            <span style="font-size: 0.8rem; color: var(--text-muted);">or</span>
+            <kbd>⌥ Option</kbd> + <kbd>F</kbd>
+          </div>
+        </div>
+        <div class="shortcut-card">
+          <span class="shortcut-desc">Open Full Dashboard</span>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <kbd>Alt</kbd> + <kbd>D</kbd>
+            <span style="font-size: 0.8rem; color: var(--text-muted);">or</span>
+            <kbd>⌥ Option</kbd> + <kbd>D</kbd>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAQ Section -->
+  <section class="container" id="faq" style="padding-bottom: 5rem;">
+    <div class="section-title">
+      <h2>❓ Frequently Asked Questions</h2>
+      <p>Clear answers about Remi Assistant, OS notifications, offline privacy, and settings.</p>
+    </div>
+
+    <div class="faq-container">
+      
+      <details class="faq-item" open>
+        <summary class="faq-summary">
+          <span>👦 How does Remi Assistant work and where does Remi appear?</span>
+          <span class="faq-arrow">▼</span>
+        </summary>
+        <div class="faq-body">
+          <p>Remi is your intelligent floating mascot assistant. When a reminder fires:</p>
+          <p>• <strong>3-Stage Animation Sequence:</strong> Remi plays an animated sequence (Welcome Wave → Idle Transition → Waiting Loop). Upon taking action or completing the reminder, Remi plays a celebration outro before closing.</p>
+          <p>• <strong>Screen Position:</strong> Remi floats in your configured position (Top Right or Bottom Right).</p>
+          <p>• <strong>Restricted Chrome Pages:</strong> Chrome security policies strictly prohibit floating content script overlays on internal browser tabs (such as <code>chrome://newtab</code>, <code>chrome://settings</code>, <code>chrome://extensions</code>, or Chrome Web Store). On these tabs, Reminderly automatically falls back to system browser notifications so you never miss an alert.</p>
+        </div>
+      </details>
+
+      <details class="faq-item">
+        <summary class="faq-summary">
+          <span>💻 Why are macOS or Windows system notifications not displaying?</span>
+          <span class="faq-arrow">▼</span>
+        </summary>
+        <div class="faq-body">
+          <p>If browser desktop notifications are not popping up, check your operating system settings:</p>
+          <p>• <strong>macOS System Settings:</strong> Open <em>Apple Menu  → System Settings → Notifications → Google Chrome</em>. Ensure <strong>Allow Notifications</strong> is ON and Alert Style is set to <strong>Banners</strong> or <strong>Alerts</strong>.</p>
+          <p>• <strong>macOS Focus Mode / Do Not Disturb:</strong> If Focus Mode or DND is active in the macOS menu bar, macOS silences banners unless Chrome is added to <em>Focus → Allowed Apps</em>.</p>
+          <p>• <strong>Windows Notifications & Focus Assist:</strong> Open <em>Windows Settings → System → Notifications & Focus Assist</em> and ensure Google Chrome notifications are permitted.</p>
+        </div>
+      </details>
+
+      <details class="faq-item">
+        <summary class="faq-summary">
+          <span>🔊 Why is notification sound silent or muted?</span>
+          <span class="faq-arrow">▼</span>
+        </summary>
+        <div class="faq-body">
+          <p>Audio playback is subject to browser and operating system policies:</p>
+          <p>• <strong>Web Audio Autoplay Policy:</strong> Modern browsers (Chrome, Edge, Brave) require at least one user interaction (a click anywhere on a webpage) before Web Audio can synthesize or play sound chimes automatically.</p>
+          <p>• <strong>Volume & Sound Tone Settings:</strong> Check <em>Settings → Preferences & Audio</em> to ensure notification volume is turned up and test your chosen sound tone (Glass Chime, Soft Dual Wave, Energetic Ring, or Classic Bell).</p>
+          <p>• <strong>Background Tab Throttling:</strong> Browsers throttle inactive background timers to save battery (~1 min delay), but persistent alarms trigger sound chimes as soon as Chrome is active.</p>
+        </div>
+      </details>
+
+      <details class="faq-item">
+        <summary class="faq-summary">
+          <span>🧠 How does Focus Mode work?</span>
+          <span class="faq-arrow">▼</span>
+        </summary>
+        <div class="faq-body">
+          <p>Focus Mode helps you execute deep work sessions without distractions:</p>
+          <p>• <strong>Preset & Custom Timers:</strong> Quickly launch 25-minute (Pomodoro), 45-minute, or Custom minute focus timers.</p>
+          <p>• <strong>Website Blocker Integration:</strong> When active, listed distracting websites (e.g. YouTube, Reddit) show a full-page glassmorphic blocker overlay.</p>
+          <p>• <strong>Smart Queueing:</strong> Non-critical reminders are held silently in the queue until your focus session completes.</p>
+        </div>
+      </details>
+
+      <details class="faq-item">
+        <summary class="faq-summary">
+          <span>🛡️ How does Smart Context-Aware Queueing work?</span>
+          <span class="faq-arrow">▼</span>
+        </summary>
+        <div class="faq-body">
+          <p>When Smart Context Awareness is enabled, Reminderly respects your workflow:</p>
+          <p>• <strong>Priority Work Domains:</strong> While active on designated work domains (e.g., Notion, Figma, GitHub), non-critical reminders (Low & Medium) are held silently in the queue to protect your deep work state.</p>
+          <p>• <strong>High Priority & Health Reminders:</strong> High-priority tasks and health breaks (Water, Eye Rest, Posture, Medicine) always deliver immediately regardless of site.</p>
+        </div>
+      </details>
+
+      <details class="faq-item">
+        <summary class="faq-summary">
+          <span>📦 What happens to passed one-time reminders and archived items?</span>
+          <span class="faq-arrow">▼</span>
+        </summary>
+        <div class="faq-body">
+          <p>• <strong>Passed One-Time Reminders:</strong> One-time reminders automatically move to the <strong>Archive</strong> tab once their scheduled time passes. You can view, search, or permanently delete them from the Archive.</p>
+          <p>• <strong>Restoring Reminders:</strong> Restoring a repeating reminder automatically recalculates its next future run time from the current moment.</p>
+        </div>
+      </details>
+
+      <details class="faq-item">
+        <summary class="faq-summary">
+          <span>🏥 What is the Health Hub & Auto Health Sync?</span>
+          <span class="faq-arrow">▼</span>
+        </summary>
+        <div class="faq-body">
+          <p>The Health Hub manages micro-breaks and daily wellness tracking:</p>
+          <p>• <strong>Hydration Tracker:</strong> Track daily water glasses (+1 Glass button) with smart interval alerts.</p>
+          <p>• <strong>20-20-20 Eye Rest & Posture Checks:</strong> Timed micro-breaks with live 20-second countdown timers.</p>
+          <p>• <strong>Period & Cycle Tracker:</strong> Private menstrual cycle predictions and pre-period reminders.</p>
+          <p>• <strong>Auto Health Sync:</strong> Fixed health break schedules automatically sync with your main active reminders list.</p>
+        </div>
+      </details>
+
+      <details class="faq-item">
+        <summary class="faq-summary">
+          <span>🔒 Is my health data and personal profile private?</span>
+          <span class="faq-arrow">▼</span>
+        </summary>
+        <div class="faq-body">
+          <p><strong>100% Offline & Private!</strong> All your data—including reminders, focus stats, water logs, medication schedules, and user profile information—is stored strictly inside your local browser storage (<code>chrome.storage.local</code>). Zero data is collected or sent to any server.</p>
+        </div>
+      </details>
+
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container">
+      <div class="footer-brand">
+        <div class="logo-text">Reminderly</div>
+        <div class="footer-tagline">REMEMBER SMARTER <span style="opacity: 0.35; margin: 0 3px;">|</span> STAY FOCUSED</div>
+      </div>
+
+      <div class="browser-list">
+        <span><i class="fa-brands fa-apple"></i> macOS</span>
+        <span><i class="fa-brands fa-windows"></i> Windows</span>
+        <span>•</span>
+        <span><i class="fa-brands fa-chrome"></i> Google Chrome</span>
+        <span><i class="fa-brands fa-edge"></i> Microsoft Edge</span>
+        <span><i class="fa-brands fa-brave"></i> Brave</span>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <a href="privacy.html" style="color: var(--text-secondary); text-decoration: none; font-size: 0.85rem; font-weight: 500;">🔒 Privacy Policy</a>
+      </div>
+
+      <div class="footer-copyright">
+        © 2026 Reminderly. All rights reserved. Built for private, distraction-free productivity.
+      </div>
+    </div>
+  </footer>
+
+</body>
+</html>
