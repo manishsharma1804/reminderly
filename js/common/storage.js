@@ -87,7 +87,7 @@ class StorageManager {
   async saveCustomCategory(customCat) {
     const rawLabel = (customCat && customCat.label) ? customCat.label.trim() : '';
     const label = rawLabel || 'General';
-    
+
     let icon = '🔔';
     if (customCat && customCat.icon && customCat.icon.trim()) {
       const graphemes = Array.from(customCat.icon.trim());
@@ -100,8 +100,8 @@ class StorageManager {
     const categories = await this.getCustomCategories();
 
     // Case-insensitive check: find existing category with same normalized key
-    const existingIndex = categories.findIndex(c => 
-      (c.key || '').toLowerCase() === normalizedKey || 
+    const existingIndex = categories.findIndex(c =>
+      (c.key || '').toLowerCase() === normalizedKey ||
       (c.label || '').toLowerCase() === normalizedKey
     );
 
@@ -127,6 +127,10 @@ class StorageManager {
 
     await this.set(STORAGE_KEYS.CUSTOM_CATEGORIES, categories);
     return categories[existingIndex !== -1 ? existingIndex : categories.length - 1];
+  }
+
+  async saveCustomCategories(categories) {
+    await this.set(STORAGE_KEYS.CUSTOM_CATEGORIES, categories || []);
   }
 
   async getFocusState() {
@@ -159,7 +163,7 @@ class StorageManager {
     const today = getTodayKey();
     const allStats = await this.get(STORAGE_KEYS.DAILY_STATS, {});
     const streak = calculateStreakFromStats(allStats);
-    
+
     if (!allStats[today]) {
       allStats[today] = {
         date: today,
@@ -235,6 +239,10 @@ class StorageManager {
     await this.set(STORAGE_KEYS.PENDING_QUEUE, queue);
   }
 
+  async clearPendingQueue() {
+    await this.savePendingQueue([]);
+  }
+
   async getActiveReminder() {
     const queue = await this.getActiveQueue();
     return queue.length > 0 ? queue[0] : null;
@@ -243,7 +251,25 @@ class StorageManager {
   async getActiveQueue() {
     const raw = await this.get(STORAGE_KEYS.ACTIVE_REMINDER, null);
     if (!raw) return [];
-    return Array.isArray(raw) ? raw : [raw];
+    let list = Array.isArray(raw) ? raw : [raw];
+
+    // Filter out stale health interval breaks (> 15 mins old) & deduplicate health breaks
+    const now = Date.now();
+    const isHealthBreak = (r) => r.id?.startsWith('auto_health_') || ['water', 'eye', 'posture'].includes(r.category);
+
+    const healthBreaks = list.filter(isHealthBreak);
+    const regularReminders = list.filter(r => !isHealthBreak(r));
+
+    if (healthBreaks.length > 0) {
+      // Keep only the single latest health break that is fresh (created <= 15m ago)
+      const latestHealth = healthBreaks[healthBreaks.length - 1];
+      const age = now - (latestHealth._queuedAt || latestHealth.created || now);
+      if (age <= 15 * 60 * 1000) {
+        regularReminders.push(latestHealth);
+      }
+    }
+
+    return regularReminders;
   }
 
   async saveActiveReminder(reminder) {
@@ -251,6 +277,7 @@ class StorageManager {
   }
 
   async pushActiveQueue(reminder) {
+    reminder._queuedAt = Date.now();
     const queue = await this.getActiveQueue();
     const idx = queue.findIndex(q => q.id === reminder.id);
     if (idx !== -1) {
@@ -260,6 +287,10 @@ class StorageManager {
     }
     await this.set(STORAGE_KEYS.ACTIVE_REMINDER, queue);
     return queue;
+  }
+
+  async addActiveQueue(reminder) {
+    return await this.pushActiveQueue(reminder);
   }
 
   async removeFromActiveQueue(id) {
@@ -404,16 +435,16 @@ class StorageManager {
       if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
         chrome.storage.local.clear(async () => {
           if (chrome.alarms) {
-            try { await chrome.alarms.clearAll(); } catch (e) {}
+            try { await chrome.alarms.clearAll(); } catch (e) { }
           }
-          try { localStorage.clear(); } catch (e) {}
+          try { localStorage.clear(); } catch (e) { }
           await this.set(STORAGE_KEYS.SETTINGS, DEFAULT_SETTINGS);
           await this.set(STORAGE_KEYS.REMINDERS, []);
           await this.set(STORAGE_KEYS.CUSTOM_CATEGORIES, []);
           resolve();
         });
       } else {
-        try { localStorage.clear(); } catch (e) {}
+        try { localStorage.clear(); } catch (e) { }
         this.set(STORAGE_KEYS.SETTINGS, DEFAULT_SETTINGS);
         this.set(STORAGE_KEYS.REMINDERS, []);
         this.set(STORAGE_KEYS.CUSTOM_CATEGORIES, []);

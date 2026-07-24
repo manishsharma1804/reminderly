@@ -12,20 +12,16 @@ export function getCategoryDetails(catId, customCategories = []) {
   if (!catId) return CATEGORIES.CUSTOM;
   
   const rawStr = String(catId).trim();
-  const upperKey = rawStr.toUpperCase();
-  if (CATEGORIES[upperKey]) {
-    return CATEGORIES[upperKey];
-  }
-
   const lowerKey = rawStr.toLowerCase();
 
   const HEALTH_MAP = {
     water: { id: 'water', label: 'Water', icon: '💧', color: '#06b6d4' },
-    medicine: { id: 'medicine', label: 'Medicine', icon: '💊', color: '#ec4899' },
+    medicine: { id: 'medicine', label: 'Health', icon: '💊', color: '#ec4899' },
     health: { id: 'health', label: 'Health', icon: '🩺', color: '#f472b6' },
-    eye: { id: 'eye', label: 'Eye Rest', icon: '👀', color: '#38bdf8' },
-    eyerest: { id: 'eye', label: 'Eye Rest', icon: '👀', color: '#38bdf8' },
-    posture: { id: 'posture', label: 'Posture & Stretch', icon: '🧍', color: '#10b981' }
+    eye: { id: 'eye', label: 'Health', icon: '👀', color: '#38bdf8' },
+    eyerest: { id: 'eye', label: 'Health', icon: '👀', color: '#38bdf8' },
+    posture: { id: 'posture', label: 'Health', icon: '🧍', color: '#10b981' },
+    period: { id: 'period', label: 'Health', icon: '🌸', color: '#ec4899' }
   };
 
   if (HEALTH_MAP[lowerKey]) {
@@ -85,6 +81,29 @@ export function formatTime(timestamp) {
   if (!timestamp) return '';
   const date = new Date(timestamp);
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+export function formatTimeStringToUserDevice(timeStr, formatMode = '12h') {
+  if (!timeStr) return '';
+  const parts = String(timeStr).split(':');
+  if (parts.length < 2) return timeStr;
+  let hours = parseInt(parts[0], 10);
+  const minutes = parseInt(parts[1], 10);
+  if (isNaN(hours) || isNaN(minutes)) return timeStr;
+
+  if (formatMode === '24h') {
+    const hStr = String(hours).padStart(2, '0');
+    const mStr = String(minutes).padStart(2, '0');
+    return `${hStr}:${mStr}`;
+  }
+
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  if (hours === 0) hours = 12;
+
+  const hStr = String(hours).padStart(2, '0');
+  const mStr = String(minutes).padStart(2, '0');
+  return `${hStr}:${mStr} ${ampm}`;
 }
 
 export function formatDate(timestamp) {
@@ -183,7 +202,8 @@ export function calculateStreakFromStats(allStatsMap = {}) {
     }
   }
 
-  return Math.max(1, streak);
+  const customStreak = todayStats?.streakDays || 0;
+  return Math.max(customStreak, streak);
 }
 
 export function toInputDate(timestamp = Date.now()) {
@@ -212,6 +232,11 @@ export function parseDateTime(dateStr, timeStr) {
 export function checkRestorableStreak(allStatsMap = {}) {
   const todayKey = getTodayKey();
   const yesterdayKey = getDateKeyOffset(1);
+
+  // If all 3 attempts failed permanently for yesterday, do not offer restoration
+  if (typeof localStorage !== 'undefined' && localStorage.getItem(`streak_failed_permanently_${yesterdayKey}`) === 'true') {
+    return null;
+  }
 
   // If yesterday was active, the streak is NOT broken
   const yesterdayStat = allStatsMap[yesterdayKey];
@@ -242,43 +267,38 @@ export function checkRestorableStreak(allStatsMap = {}) {
   return null;
 }
 
-export function showButtonLoader(btn, minDurationMs = 300) {
-  if (!btn || !(btn instanceof HTMLElement)) return () => {};
-  if (btn.classList.contains('btn-loading')) return () => {};
+export function calculateNextFutureTime(reminder, now = Date.now()) {
+  if (!reminder || !reminder.repeat || reminder.repeat === 'once') return null;
 
-  const originalContent = btn.innerHTML;
-  const originalWidth = btn.offsetWidth ? `${btn.offsetWidth}px` : '';
+  const interval = reminder.repeatInterval || 1;
+  let intervalMs = 24 * 3600 * 1000;
 
-  if (originalWidth) btn.style.minWidth = originalWidth;
-  btn.classList.add('btn-loading');
-
-  if (!btn.querySelector('.btn-spinner')) {
-    const spinner = document.createElement('span');
-    spinner.className = 'btn-spinner';
-    btn.insertBefore(spinner, btn.firstChild);
+  switch (reminder.repeat) {
+    case 'every_x_minutes':
+      intervalMs = Math.max(1, interval) * 60 * 1000;
+      break;
+    case 'every_x_hours':
+      intervalMs = Math.max(1, interval) * 3600 * 1000;
+      break;
+    case 'daily':
+      intervalMs = 24 * 3600 * 1000 * interval;
+      break;
+    case 'weekly':
+      intervalMs = 7 * 24 * 3600 * 1000 * interval;
+      break;
+    case 'monthly':
+      intervalMs = 30 * 24 * 3600 * 1000 * interval;
+      break;
+    case 'every_x_days':
+      intervalMs = Math.max(1, interval) * 24 * 3600 * 1000;
+      break;
   }
 
-  const startTime = Date.now();
-
-  return () => {
-    const elapsed = Date.now() - startTime;
-    const remaining = Math.max(0, minDurationMs - elapsed);
-
-    setTimeout(() => {
-      btn.classList.remove('btn-loading');
-      btn.innerHTML = originalContent;
-      btn.style.minWidth = '';
-    }, remaining);
-  };
+  let nextTime = reminder.time || now;
+  while (nextTime <= now) {
+    nextTime += intervalMs;
+  }
+  return nextTime;
 }
 
-// Global button click interceptor for instant UI loader feedback on all buttons
-if (typeof window !== 'undefined') {
-  document.addEventListener('click', (e) => {
-    const btn = e.target.closest('button, .btn, .icon-btn, .remi-btn');
-    if (!btn || btn.classList.contains('no-loader') || btn.classList.contains('btn-loading')) return;
 
-    const stopLoader = showButtonLoader(btn, 300);
-    setTimeout(() => stopLoader(), 350);
-  }, true);
-}

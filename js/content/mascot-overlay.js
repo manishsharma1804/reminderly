@@ -9,6 +9,16 @@ import { getCategoryDetails } from '../common/utils.js';
 let activeOverlay = null;
 let isCelebratingOutro = false;
 
+// Mark page as having Reminderly extension installed & listen for dashboard open requests
+try {
+  document.documentElement.setAttribute('data-reminderly-installed', 'true');
+  window.addEventListener('REMINDERLY_OPEN_DASHBOARD', () => {
+    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+      chrome.runtime.sendMessage({ action: 'OPEN_DASHBOARD' }).catch(() => {});
+    }
+  });
+} catch (e) {}
+
 export function renderMascotReminder(reminder, settings, queue = [], currentIndex = 0) {
   if (!queue || queue.length === 0) {
     queue = [reminder];
@@ -70,19 +80,18 @@ export function renderMascotReminder(reminder, settings, queue = [], currentInde
           </span>
         </div>
         <div class="remi-title">${escapeHTML(reminder.title)}</div>
+        ${reminder._wasDelayedByFocus ? `
+          <div class="remi-delayed-tag" style="display: inline-flex; align-items: center; gap: 4px; font-size: 0.78rem; font-weight: 600; color: #f59e0b; background: rgba(245, 158, 11, 0.12); padding: 3px 8px; border-radius: 6px; margin: 4px 0 6px 0; border: 1px solid rgba(245, 158, 11, 0.25);">
+            ⏳ Delayed while you were in Focus Mode
+          </div>
+        ` : ''}
         <div class="remi-desc">${escapeHTML(reminder.description || 'Time for your scheduled reminder!')}</div>
         <div class="remi-actions">
           ${(() => {
             if (reminder.isPeriodReminder) {
               return `
-                <button class="remi-btn remi-btn-done" id="remi-action-done" style="background: linear-gradient(135deg,#ec4899,#a855f7);">
-                  Got it! 🩸
-                </button>
-                <button class="remi-btn remi-btn-snooze" id="remi-action-snooze" style="border-color:#ec489955;">
-                  📅 1d
-                </button>
-                <button class="remi-btn remi-btn-skip" id="remi-action-skip">
-                  ✕ Dismiss
+                <button class="remi-btn remi-btn-done" id="remi-action-done" style="background: linear-gradient(135deg,#ec4899,#a855f7); width: 100%;">
+                  Got it! 🌸
                 </button>
               `;
             } else {
@@ -182,6 +191,24 @@ export function renderMascotReminder(reminder, settings, queue = [], currentInde
     if (titleEl) {
       titleEl.textContent = currentRem.title;
     }
+
+    let delayedTag = root.querySelector('.remi-delayed-tag');
+    if (currentRem._wasDelayedByFocus) {
+      if (!delayedTag) {
+        delayedTag = document.createElement('div');
+        delayedTag.className = 'remi-delayed-tag';
+        delayedTag.style.cssText = 'display: inline-flex; align-items: center; gap: 4px; font-size: 0.78rem; font-weight: 600; color: #f59e0b; background: rgba(245, 158, 11, 0.12); padding: 3px 8px; border-radius: 6px; margin: 4px 0 6px 0; border: 1px solid rgba(245, 158, 11, 0.25);';
+        delayedTag.innerHTML = '⏳ Delayed while you were in Focus Mode';
+        if (titleEl && titleEl.parentNode) {
+          titleEl.parentNode.insertBefore(delayedTag, titleEl.nextSibling);
+        }
+      } else {
+        delayedTag.style.display = 'inline-flex';
+      }
+    } else if (delayedTag) {
+      delayedTag.style.display = 'none';
+    }
+
     const descEl = root.querySelector('.remi-desc');
     if (descEl) {
       descEl.textContent = currentRem.description || 'Time for your scheduled reminder!';
@@ -203,18 +230,46 @@ export function renderMascotReminder(reminder, settings, queue = [], currentInde
     
     if (btnDone && btnSnooze && btnSkip) {
       if (currentRem.isPeriodReminder) {
-        btnDone.innerHTML = 'Got it! 🩸';
+        btnDone.innerHTML = 'Got it! 🌸';
         btnDone.style.background = 'linear-gradient(135deg,#ec4899,#a855f7)';
-        btnSnooze.innerHTML = '📅 1d';
-        btnSnooze.style.borderColor = '#ec489955';
-        btnSkip.innerHTML = '✕ Dismiss';
+        btnDone.style.flex = '1';
+        btnSnooze.style.display = 'none';
+        btnSkip.style.display = 'none';
+
+        let logEarlyBtn = root.querySelector('#remi-action-log-period-today');
+        if (!logEarlyBtn) {
+          logEarlyBtn = document.createElement('button');
+          logEarlyBtn.id = 'remi-action-log-period-today';
+          logEarlyBtn.className = 'remi-btn';
+          logEarlyBtn.style.cssText = 'background: rgba(236,72,153,0.15); border: 1px solid #ec4899; color: #f472b6; font-weight: 700; width: 100%; margin-top: 8px; font-size: 0.8rem; padding: 8px; border-radius: 8px; cursor: pointer;';
+          logEarlyBtn.innerHTML = '🩸 Period Started Today (Log Early)';
+          const actionsDiv = root.querySelector('.remi-actions');
+          if (actionsDiv) {
+            actionsDiv.style.flexDirection = 'column';
+            actionsDiv.appendChild(logEarlyBtn);
+          }
+          logEarlyBtn.addEventListener('click', async () => {
+            safeSendMessage({ action: 'LOG_PERIOD_START', daysBackOffset: 0 });
+            setTimeout(() => {
+              handleItemAction({ action: 'MARK_DONE', id: currentRem.id });
+            }, 220);
+          });
+        } else {
+          logEarlyBtn.style.display = 'block';
+        }
       } else {
+        const logEarlyBtn = root.querySelector('#remi-action-log-period-today');
+        if (logEarlyBtn) logEarlyBtn.style.display = 'none';
+        const actionsDiv = root.querySelector('.remi-actions');
+        if (actionsDiv) actionsDiv.style.flexDirection = 'row';
         btnDone.innerHTML = '✓ Done';
         btnDone.style.background = '';
         const snoozeMins = settings.defaultSnoozeMinutes || 10;
         const snoozeLabel = snoozeMins >= 60 ? (snoozeMins / 60) + 'h' : snoozeMins + 'm';
         btnSnooze.innerHTML = '⏰ ' + snoozeLabel;
         btnSnooze.style.borderColor = '';
+        btnSnooze.style.fontSize = '';
+        btnSkip.style.display = '';
         btnSkip.innerHTML = '✕ Skip';
       }
     }
@@ -462,10 +517,19 @@ export function renderMascotReminder(reminder, settings, queue = [], currentInde
   root.querySelector('#remi-action-snooze').addEventListener('click', async () => {
     const currentRem = queue[currentIndex];
     if (!currentRem) return;
-    const snoozeMinutes = currentRem.isPeriodReminder ? 1440 : (settings.defaultSnoozeMinutes || 10);
-    setTimeout(() => {
-      handleItemAction({ action: 'SNOOZE_REMINDER', id: currentRem.id, minutes: snoozeMinutes });
-    }, 220);
+    if (currentRem.isPeriodReminder) {
+      const btn = root.querySelector('#remi-action-snooze');
+      const remindInDays = parseInt(btn?.dataset?.periodRemindDays || '1', 10);
+      const remindMinutes = remindInDays * 24 * 60;
+      setTimeout(() => {
+        handleItemAction({ action: 'SNOOZE_REMINDER', id: currentRem.id, minutes: remindMinutes });
+      }, 220);
+    } else {
+      const snoozeMinutes = settings.defaultSnoozeMinutes || 10;
+      setTimeout(() => {
+        handleItemAction({ action: 'SNOOZE_REMINDER', id: currentRem.id, minutes: snoozeMinutes });
+      }, 220);
+    }
   });
 
   root.querySelector('#remi-action-skip').addEventListener('click', async () => {
@@ -477,24 +541,23 @@ export function renderMascotReminder(reminder, settings, queue = [], currentInde
   });
 }
 
-export function triggerFocusCompletedCelebration() {
+export function triggerFocusCompletedCelebration(durationMinutes) {
   removeExistingMascot();
 
   const root = document.createElement('div');
   root.id = 'remi-overlay-root';
   root.className = 'pos-bottom-right';
 
+  const durationStr = durationMinutes ? `for ${durationMinutes} minute${durationMinutes === 1 ? '' : 's'}` : 'today';
+
   root.innerHTML = `
     <div class="remi-container">
-      <div class="remi-speech-bubble" style="border-color: #10b981;">
+      <div class="remi-speech-bubble no-avatar" style="border-color: #10b981; margin-bottom: 120px;">
         <div class="remi-title" style="color: #34d399;">🎉 Focus Session Completed!</div>
-        <div class="remi-desc">Fantastic job staying focused and productive today!</div>
-        <button class="remi-btn remi-btn-done" id="remi-celebrate-close" style="width:100%;">
+        <div class="remi-desc">Fantastic job staying focused and productive ${durationStr}!</div>
+        <button class="remi-btn remi-btn-done" id="remi-celebrate-close" style="width:100%; margin-top: 12px;">
           Awesome!
         </button>
-      </div>
-      <div class="remi-avatar remi-celebrate">
-        ${getMascotSVG('remi', MASCOT_EMOTIONS.HAPPY, 120, 'outro')}
       </div>
     </div>
   `;
@@ -502,8 +565,16 @@ export function triggerFocusCompletedCelebration() {
   document.body.appendChild(root);
   activeOverlay = root;
 
-  root.querySelector('#remi-celebrate-close').addEventListener('click', () => {
-    removeExistingMascot();
+  root.querySelector('#remi-celebrate-close').addEventListener('click', async () => {
+    removeExistingMascot(true);
+    try {
+      const { storage } = await import(chrome.runtime.getURL('js/common/storage.js'));
+      const activeQueue = await storage.getActiveQueue();
+      const settings = await storage.getSettings();
+      if (activeQueue && activeQueue.length > 0) {
+        renderMascotReminder(activeQueue[0], settings, activeQueue, 0);
+      }
+    } catch (e) {}
   });
 }
 

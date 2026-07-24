@@ -2,6 +2,8 @@
  * Reminderly App Constants
  */
 
+export const APP_VERSION = '1.0.18';
+
 export const CATEGORIES = {
   WORKOUT: { id: 'workout', label: 'Workout', icon: '🏋️‍♂️', color: '#10b981' },
   STUDY: { id: 'study', label: 'Study', icon: '📚', color: '#8b5cf6' },
@@ -37,7 +39,7 @@ export const DEFAULT_BLOCKLIST = [];
 export const DEFAULT_SETTINGS = {
   theme: 'system', // 'system' | 'dark' | 'light'
   soundEnabled: true,
-  volume: 80, // 0 - 100
+  volume: 100, // 0 - 100
   soundTone: 'chime', // 'chime' | 'gentle' | 'energetic' | 'classic'
   autoStartup: true,
   animationsEnabled: true,
@@ -70,6 +72,7 @@ export const DEFAULT_SETTINGS = {
     remindTime: '09:00'
   },
   healthSettings: {
+    waterEnabled: true,
     waterGoal: 8,
     waterIntervalMinutes: 60,
     eyeRestEnabled: true,

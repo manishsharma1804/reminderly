@@ -2,7 +2,7 @@
  * Reminderly Main Service Worker (MV3)
  */
 
-import { setupAlarms, handleAlarmTriggered, snoozeReminder } from './alarms-engine.js';
+import { setupAlarms, handleAlarmTriggered, snoozeReminder, completeFocusMode, logPeriodStart, revertPeriodStart, syncPeriodReminderState } from './alarms-engine.js';
 import { initContextDetector } from './context-detector.js';
 import { initFocusManager, tempAllowDomain } from './focus-manager.js';
 import { storage } from '../common/storage.js';
@@ -76,10 +76,16 @@ if (chrome.notifications) {
       // Done / "Got it 🩸"
       await markReminderDone(notificationId);
     } else if (buttonIndex === 1) {
-      // Snooze
+      // Snooze / Remind later
       const settings = await storage.getSettings();
       const defaultMins = settings.defaultSnoozeMinutes || 10;
-      const snoozeMinutes = reminder?.isPeriodReminder ? 1440 : defaultMins;
+      let snoozeMinutes = defaultMins;
+      if (reminder?.isPeriodReminder) {
+        // Smart: remind in half the remaining days (min 1 day)
+        const daysLeft = Math.max(1, Math.ceil((reminder.time - Date.now()) / (1000 * 60 * 60 * 24)));
+        const remindInDays = Math.max(1, Math.floor(daysLeft / 2));
+        snoozeMinutes = remindInDays * 24 * 60;
+      }
       await snoozeReminder(notificationId, snoozeMinutes);
     }
     chrome.notifications.clear(notificationId);
@@ -113,22 +119,71 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sendResponse({ success: true });
         break;
 
-      case 'START_FOCUS_MODE':
+      case 'LOG_PERIOD_START': {
+        const result = await logPeriodStart(request.date || null, request.daysBackOffset || 0);
+        sendResponse(result);
+        break;
+      }
+
+      case 'REVERT_PERIOD_START': {
+        const result = await revertPeriodStart();
+        sendResponse(result);
+        break;
+      }
+
+      case 'SYNC_PERIOD_REMINDER':
+        await syncPeriodReminderState();
+        await setupAlarms();
+        sendResponse({ success: true });
+        break;
+
+      case 'START_FOCUS_MODE': {
         const endTime = Date.now() + request.durationMinutes * 60 * 1000;
+        const currentFs = await storage.getFocusState();
         await storage.saveFocusState({
           active: true,
           paused: false,
           remainingMs: null,
           endTime: endTime,
           durationMinutes: request.durationMinutes,
-          startTime: Date.now()
+          startTime: Date.now(),
+          pinned: currentFs?.pinned !== undefined ? currentFs.pinned : true
         });
+        if (typeof chrome !== 'undefined' && chrome.alarms) {
+          chrome.alarms.create('reminderly_focus_timer_end', { when: endTime });
+        }
         sendResponse({ success: true });
         break;
+      }
+
+      case 'COMPLETE_FOCUS_MODE': {
+        if (typeof chrome !== 'undefined' && chrome.alarms) {
+          chrome.alarms.clear('reminderly_focus_timer_end');
+        }
+        await completeFocusMode();
+        sendResponse({ success: true });
+        break;
+      }
+
+      case 'TOGGLE_PIN_FOCUS_CLOCK': {
+        const current = await storage.getFocusState();
+        if (current && current.active) {
+          const isPinned = current.pinned !== undefined ? current.pinned : true;
+          await storage.saveFocusState({
+            ...current,
+            pinned: !isPinned
+          });
+        }
+        sendResponse({ success: true });
+        break;
+      }
 
       case 'PAUSE_FOCUS_MODE': {
         const current = await storage.getFocusState();
         if (current && current.active && !current.paused && current.endTime) {
+          if (typeof chrome !== 'undefined' && chrome.alarms) {
+            chrome.alarms.clear('reminderly_focus_timer_end');
+          }
           const remainingMs = Math.max(0, current.endTime - Date.now());
           await storage.saveFocusState({
             ...current,
@@ -145,6 +200,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const current = await storage.getFocusState();
         if (current && current.active && current.paused && current.remainingMs) {
           const newEndTime = Date.now() + current.remainingMs;
+          if (typeof chrome !== 'undefined' && chrome.alarms) {
+            chrome.alarms.create('reminderly_focus_timer_end', { when: newEndTime });
+          }
           await storage.saveFocusState({
             ...current,
             paused: false,
@@ -157,6 +215,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       }
 
       case 'STOP_FOCUS_MODE':
+        if (typeof chrome !== 'undefined' && chrome.alarms) {
+          chrome.alarms.clear('reminderly_focus_timer_end');
+        }
         await storage.saveFocusState({ active: false, paused: false, remainingMs: null, endTime: null, durationMinutes: 0, startTime: null });
         sendResponse({ success: true });
         break;
@@ -168,6 +229,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
       case 'CLEAR_PENDING_QUEUE':
         await storage.savePendingQueue([]);
+        sendResponse({ success: true });
+        break;
+
+      case 'OPEN_DASHBOARD':
+        if (typeof chrome !== 'undefined' && chrome.tabs) {
+          chrome.tabs.create({ url: chrome.runtime.getURL('dashboard/dashboard.html') });
+        }
         sendResponse({ success: true });
         break;
 
@@ -301,8 +369,24 @@ async function markReminderDone(id) {
       isWaterReminder = true;
     }
 
-    // Reschedule repeat reminders or disable one-time reminders
-    if (rem.repeat && rem.repeat !== 'once') {
+    if (rem.isPeriodReminder || rem.id === 'auto_period_reminder') {
+      // Period reminder: reschedule to tomorrow at configured remindTime (e.g. 09:00 AM tomorrow)
+      const settings = await storage.getSettings();
+      const period = settings.periodTracker || {};
+      const remindTimeStr = period.remindTime || '09:00';
+      const [rHour, rMin] = remindTimeStr.split(':').map(Number);
+
+      const nextTime = new Date();
+      nextTime.setDate(nextTime.getDate() + 1); // Tomorrow
+      nextTime.setHours(rHour, rMin, 0, 0);
+
+      rem.time = nextTime.getTime();
+      rem.enabled = true;
+
+      if (typeof chrome !== 'undefined' && chrome.alarms) {
+        chrome.alarms.create(rem.id, { when: rem.time });
+      }
+    } else if (rem.repeat && rem.repeat !== 'once') {
       let nextTime = Date.now();
       const interval = rem.repeatInterval || 1;
       switch (rem.repeat) {
@@ -372,4 +456,16 @@ async function markReminderSkipped(id) {
   const queue = await storage.getPendingQueue();
   const newQueue = queue.filter(q => q.id !== id);
   await storage.savePendingQueue(newQueue);
+}
+
+if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessageExternal) {
+  chrome.runtime.onMessageExternal.addListener((request, sender, sendResponse) => {
+    if (request.action === 'OPEN_DASHBOARD' || request.action === 'PING_EXTENSION') {
+      if (request.action === 'OPEN_DASHBOARD' && chrome.tabs) {
+        chrome.tabs.create({ url: chrome.runtime.getURL('dashboard/dashboard.html') });
+      }
+      sendResponse({ success: true, installed: true });
+    }
+    return true;
+  });
 }

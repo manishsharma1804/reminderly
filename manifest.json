@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Reminderly – Smart Reminder Assistant",
   "short_name": "Reminderly",
-  "version": "1.0.0",
+  "version": "1.0.18",
   "description": "Intelligent, context-aware reminder assistant with Focus Mode, Website Blocker, Remi Assistant, and Analytics Dashboard.",
   "icons": {
     "16": "icons/16x16.png",
@@ -35,6 +35,13 @@
   "host_permissions": [
     "<all_urls>"
   ],
+  "externally_connectable": {
+    "matches": [
+      "https://manishsharma1804.github.io/*",
+      "http://localhost/*",
+      "http://127.0.0.1/*"
+    ]
+  },
   "content_scripts": [
     {
       "matches": [

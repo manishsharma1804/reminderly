@@ -224,3 +224,109 @@
   background: rgba(0, 0, 0, 0.1);
   border-color: rgba(99, 102, 241, 0.4);
 }
+
+/* Floating Draggable Focus Clock Overlay */
+#remi-focus-clock-root {
+  position: fixed !important;
+  z-index: 2147483645 !important;
+  isolation: isolate;
+  font-family: 'Inter', -apple-system, sans-serif;
+  user-select: none;
+  touch-action: none;
+}
+
+#remi-focus-clock-root.is-dragging {
+  cursor: grabbing !important;
+  opacity: 0.9;
+}
+
+.remi-focus-clock-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(15, 23, 42, 0.92);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4), 0 0 20px rgba(56, 189, 248, 0.25);
+  border-radius: 999px;
+  padding: 8px 16px;
+  color: #f8fafc;
+  cursor: grab;
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.remi-focus-clock-pill:hover {
+  border-color: rgba(56, 189, 248, 0.6);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5), 0 0 25px rgba(56, 189, 248, 0.35);
+}
+
+.remi-focus-drag-dots {
+  color: #64748b;
+  font-size: 1rem;
+  letter-spacing: -2px;
+  cursor: grab;
+}
+
+.remi-focus-icon {
+  font-size: 1.2rem;
+}
+
+.remi-focus-timer-text {
+  font-family: 'Outfit', 'Inter', monospace, sans-serif;
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: #38bdf8;
+  letter-spacing: 0.04em;
+  min-width: 55px;
+}
+
+.remi-focus-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 4px;
+}
+
+.remi-focus-action-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  cursor: pointer;
+  color: #ffffff;
+  transition: all 0.15s ease;
+}
+
+.remi-focus-action-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  transform: scale(1.1);
+}
+
+.remi-focus-action-btn.active-pin {
+  background: transparent;
+  border-color: transparent;
+}
+
+/* Light Mode Focus Clock Overlay */
+#remi-focus-clock-root.theme-light .remi-focus-clock-pill {
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(14, 165, 233, 0.3);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.12), 0 0 20px rgba(14, 165, 233, 0.15);
+  color: #0f172a;
+}
+
+#remi-focus-clock-root.theme-light .remi-focus-timer-text {
+  color: #0284c7;
+}
+
+#remi-focus-clock-root.theme-light .remi-focus-action-btn {
+  background: rgba(0, 0, 0, 0.06);
+  border-color: rgba(0, 0, 0, 0.12);
+  color: #1e293b;
+}

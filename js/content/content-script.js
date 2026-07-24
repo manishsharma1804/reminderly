@@ -5,6 +5,7 @@
 (async () => {
   const { renderMascotReminder, removeExistingMascot, triggerFocusCompletedCelebration } = await import(chrome.runtime.getURL('js/content/mascot-overlay.js'));
   const { renderBlockerOverlay } = await import(chrome.runtime.getURL('js/content/blocker-overlay.js'));
+  const { renderFocusClockOverlay, removeFocusClockOverlay } = await import(chrome.runtime.getURL('js/content/focus-clock-overlay.js'));
   const { storage } = await import(chrome.runtime.getURL('js/common/storage.js'));
   const { soundEngine } = await import(chrome.runtime.getURL('js/common/audio.js'));
 
@@ -15,10 +16,15 @@
     } catch (e) { }
   });
 
-  // On page load or refresh, check if active reminders are waiting to be completed/snoozed/skipped!
+  // On page load or refresh, check focus clock overlay and active queue
   try {
+    const focusState = await storage.getFocusState();
+    const settings = await storage.getSettings();
+    if (focusState && focusState.active && focusState.pinned) {
+      renderFocusClockOverlay(focusState, settings);
+    }
+
     if (document.visibilityState === 'visible') {
-      const settings = await storage.getSettings();
       const activeQueue = await storage.getActiveQueue();
       if (activeQueue && activeQueue.length > 0) {
         const topRem = activeQueue[0];
@@ -68,7 +74,7 @@
               soundEngine.playCelebration();
             } catch (e) {}
           }
-          triggerFocusCompletedCelebration();
+          triggerFocusCompletedCelebration(request.durationMinutes);
           sendResponse({ success: true });
           break;
         }
@@ -88,27 +94,43 @@
     return true;
   });
 
-  // Listen for settings changes to dynamically toggle theme on any open overlay
+  // Listen for settings & focus state changes to dynamically update overlays
   if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged) {
-    chrome.storage.onChanged.addListener((changes, areaName) => {
-      if (areaName === 'local' && changes.reminderly_settings) {
-        const newSettings = changes.reminderly_settings.newValue;
-        if (newSettings) {
-          const userTheme = newSettings.theme || 'system';
-          const effectiveTheme = (userTheme === 'system' || !userTheme)
-            ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-            : userTheme;
+    chrome.storage.onChanged.addListener(async (changes, areaName) => {
+      if (areaName === 'local') {
+        if (changes.reminderly_settings) {
+          const newSettings = changes.reminderly_settings.newValue;
+          if (newSettings) {
+            const userTheme = newSettings.theme || 'system';
+            const effectiveTheme = (userTheme === 'system' || !userTheme)
+              ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+              : userTheme;
 
-          const root = document.getElementById('remi-overlay-root');
-          if (root) {
-            // Filter out existing theme- classes and add the new one
-            const currentClasses = Array.from(root.classList).filter(c => !c.startsWith('theme-'));
-            root.className = [...currentClasses, `theme-${effectiveTheme}`].join(' ');
+            const root = document.getElementById('remi-overlay-root');
+            if (root) {
+              const currentClasses = Array.from(root.classList).filter(c => !c.startsWith('theme-'));
+              root.className = [...currentClasses, `theme-${effectiveTheme}`].join(' ');
+            }
+
+            const blockerRoot = document.getElementById('reminderly-blocker-root');
+            if (blockerRoot) {
+              blockerRoot.className = `theme-${effectiveTheme}`;
+            }
+
+            const clockRoot = document.getElementById('remi-focus-clock-root');
+            if (clockRoot) {
+              clockRoot.className = `theme-${effectiveTheme}`;
+            }
           }
+        }
 
-          const blockerRoot = document.getElementById('reminderly-blocker-root');
-          if (blockerRoot) {
-            blockerRoot.className = `theme-${effectiveTheme}`;
+        if (changes.reminderly_focus_state) {
+          const focusState = changes.reminderly_focus_state.newValue;
+          const settings = await storage.getSettings();
+          if (focusState && focusState.active && focusState.pinned) {
+            renderFocusClockOverlay(focusState, settings);
+          } else {
+            removeFocusClockOverlay();
           }
         }
       }

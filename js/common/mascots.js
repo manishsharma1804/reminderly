@@ -41,7 +41,7 @@ export function getMascotSVG(type = MASCOT_TYPES.REMI, emotion = MASCOT_EMOTIONS
   }
 
   return `
-    <div class="remi-video-avatar" style="width: ${size}px !important; height: ${size}px !important; background: transparent !important; border: none !important; overflow: hidden !important; border-radius: 16px !important; display: flex !important; align-items: center !important; justify-content: center !important;">
+    <div class="remi-video-avatar" style="width: ${size}px !important; height: ${size}px !important; background: transparent !important; border: none !important; overflow: hidden !important; border-radius: 16px !important; display: flex !important; align-items: center !important; justify-content: center !important; position: relative !important; top: 50px !important;">
       <img id="remi-gif-element" src="${src}" style="width: 100% !important; height: 100% !important; object-fit: cover !important; border-radius: 16px !important; pointer-events: none !important;" alt="">
     </div>
   `;

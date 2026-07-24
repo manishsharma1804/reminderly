@@ -41,6 +41,15 @@
       padding: 0;
     }
 
+    button, .btn, .btn-hero-primary, .btn-hero-secondary,
+    .shortcut-card, .key-badge-group, kbd, .shortcut-icon, .shortcut-keys,
+    .feature-icon, .version-meta, .badge, .navbar, nav, img, svg {
+      user-select: none;
+      -webkit-user-select: none;
+      -moz-user-select: none;
+      -ms-user-select: none;
+    }
+
     :root {
       --primary: #6366f1;
       --primary-light: #818cf8;
@@ -337,36 +346,119 @@
 
     .shortcuts-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
       gap: 1.5rem;
     }
 
     .shortcut-card {
-      background: rgba(15, 23, 42, 0.6);
+      background: rgba(15, 23, 42, 0.65);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
       border: 1px solid var(--border);
-      border-radius: 16px;
+      border-radius: 18px;
       padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 1.25rem;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+    }
+
+    .shortcut-card:hover {
+      border-color: rgba(99, 102, 241, 0.4);
+      transform: translateY(-3px);
+      box-shadow: 0 8px 30px rgba(99, 102, 241, 0.15);
+    }
+
+    .shortcut-keys {
       display: flex;
       align-items: center;
       justify-content: space-between;
+      gap: 0.75rem;
+      padding: 0.85rem 1rem;
+      background: rgba(30, 41, 59, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 14px;
+    }
+
+    .key-badge-group {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.35rem;
+    }
+
+    .os-label {
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #94a3b8;
+    }
+
+    .key-combo {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      white-space: nowrap;
+    }
+
+    .key-combo .plus {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    .key-divider {
+      width: 1px;
+      height: 30px;
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .shortcut-footer {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-top: 0.25rem;
+    }
+
+    .shortcut-icon {
+      font-size: 1.15rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: rgba(99, 102, 241, 0.12);
+      border: 1px solid rgba(99, 102, 241, 0.2);
+      flex-shrink: 0;
     }
 
     .shortcut-desc {
-      font-size: 0.95rem;
-      font-weight: 600;
+      font-size: 1.05rem;
+      font-weight: 700;
       color: var(--text-primary);
+      line-height: 1.3;
     }
 
     kbd {
-      background: var(--surface-elevated);
-      color: var(--primary-light);
-      border: 1px solid rgba(255, 255, 255, 0.15);
+      background: linear-gradient(180deg, #334155 0%, #1e293b 100%);
+      color: #f8fafc;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-bottom: 2px solid rgba(0, 0, 0, 0.4);
       border-radius: 6px;
       padding: 0.35rem 0.65rem;
       font-family: 'JetBrains Mono', monospace;
       font-size: 0.85rem;
       font-weight: 700;
       box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      white-space: nowrap;
+      line-height: 1;
     }
 
     /* Testimonials Section */
@@ -576,7 +668,7 @@
       <div class="version-meta">
         <span><i class="fa-brands fa-apple"></i> macOS & Windows Compatible</span>
         <span>•</span>
-        <span><i class="fa-solid fa-check-circle" style="color: #10b981;"></i> Manifest V3 Ready</span>
+        <span><i class="fa-solid fa-check-circle" style="color: #10b981;"></i> Manifest V3 Ready (v1.0.18)</span>
         <span>•</span>
         <span class="star-rating">
           <i class="fa-solid fa-star"></i>
@@ -662,27 +754,56 @@
 
       <div class="shortcuts-grid">
         <div class="shortcut-card">
-          <span class="shortcut-desc">Add New Quick Reminder</span>
-          <div style="display: flex; align-items: center; gap: 6px;">
-            <kbd>Alt</kbd> + <kbd>R</kbd>
-            <span style="font-size: 0.8rem; color: var(--text-muted);">or</span>
-            <kbd>⌥ Option</kbd> + <kbd>R</kbd>
+          <div class="shortcut-keys">
+            <div class="key-badge-group">
+              <span class="os-label">Win/Linux</span>
+              <div class="key-combo"><kbd>Alt</kbd><span class="plus">+</span><kbd>R</kbd></div>
+            </div>
+            <div class="key-divider"></div>
+            <div class="key-badge-group">
+              <span class="os-label">macOS</span>
+              <div class="key-combo"><kbd>⌥ Option</kbd><span class="plus">+</span><kbd>R</kbd></div>
+            </div>
+          </div>
+          <div class="shortcut-footer">
+            <span class="shortcut-icon">➕</span>
+            <span class="shortcut-desc">Add New Quick Reminder</span>
           </div>
         </div>
+
         <div class="shortcut-card">
-          <span class="shortcut-desc">Start / Toggle Focus Session</span>
-          <div style="display: flex; align-items: center; gap: 6px;">
-            <kbd>Alt</kbd> + <kbd>F</kbd>
-            <span style="font-size: 0.8rem; color: var(--text-muted);">or</span>
-            <kbd>⌥ Option</kbd> + <kbd>F</kbd>
+          <div class="shortcut-keys">
+            <div class="key-badge-group">
+              <span class="os-label">Win/Linux</span>
+              <div class="key-combo"><kbd>Alt</kbd><span class="plus">+</span><kbd>F</kbd></div>
+            </div>
+            <div class="key-divider"></div>
+            <div class="key-badge-group">
+              <span class="os-label">macOS</span>
+              <div class="key-combo"><kbd>⌥ Option</kbd><span class="plus">+</span><kbd>F</kbd></div>
+            </div>
+          </div>
+          <div class="shortcut-footer">
+            <span class="shortcut-icon">🧠</span>
+            <span class="shortcut-desc">Start / Toggle Focus Session</span>
           </div>
         </div>
+
         <div class="shortcut-card">
-          <span class="shortcut-desc">Open Full Dashboard</span>
-          <div style="display: flex; align-items: center; gap: 6px;">
-            <kbd>Alt</kbd> + <kbd>D</kbd>
-            <span style="font-size: 0.8rem; color: var(--text-muted);">or</span>
-            <kbd>⌥ Option</kbd> + <kbd>D</kbd>
+          <div class="shortcut-keys">
+            <div class="key-badge-group">
+              <span class="os-label">Win/Linux</span>
+              <div class="key-combo"><kbd>Alt</kbd><span class="plus">+</span><kbd>D</kbd></div>
+            </div>
+            <div class="key-divider"></div>
+            <div class="key-badge-group">
+              <span class="os-label">macOS</span>
+              <div class="key-combo"><kbd>⌥ Option</kbd><span class="plus">+</span><kbd>D</kbd></div>
+            </div>
+          </div>
+          <div class="shortcut-footer">
+            <span class="shortcut-icon">📊</span>
+            <span class="shortcut-desc">Open Full Dashboard</span>
           </div>
         </div>
       </div>
@@ -829,10 +950,14 @@
 
   <script>
     document.addEventListener('DOMContentLoaded', () => {
-      document.querySelectorAll('.btn-cta, .btn-hero-primary').forEach(btn => {
-        btn.addEventListener('click', () => {
-          window.dispatchEvent(new CustomEvent('REMINDERLY_OPEN_DASHBOARD'));
-        });
+      document.addEventListener('click', (e) => {
+        const link = e.target.closest('a[href*="dashboard.html"], .btn-hero-primary, .btn-cta');
+        if (link) {
+          if (document.documentElement.getAttribute('data-reminderly-installed') === 'true') {
+            e.preventDefault();
+            window.dispatchEvent(new CustomEvent('REMINDERLY_OPEN_DASHBOARD'));
+          }
+        }
       });
     });
   </script>

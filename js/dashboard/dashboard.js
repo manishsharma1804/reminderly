@@ -6,7 +6,7 @@ import { storage, STORAGE_KEYS } from '../common/storage.js';
 import { CATEGORIES, PRIORITIES } from '../common/constants.js';
 import { getMascotSVG, MASCOT_EMOTIONS } from '../common/mascots.js';
 import { soundEngine } from '../common/audio.js';
-import { generateId, formatRelativeTime, toInputDate, toInputTime, parseDateTime, formatDate, getDateKeyOffset, getTodayKey, formatTime, getCategoryDetails } from '../common/utils.js';
+import { generateId, formatRelativeTime, toInputDate, toInputTime, parseDateTime, formatDate, getDateKeyOffset, getTodayKey, formatTime, getCategoryDetails, formatTimeStringToUserDevice, checkRestorableStreak, calculateNextFutureTime } from '../common/utils.js';
 
 let currentTheme = 'dark';
 let activeRemindersList = [];
@@ -131,7 +131,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   initMascotStudio();
   initContextBlocker();
   initSettingsAndBackup();
-  initAnalyticsExportHandlers();
   await refreshActiveTab();
 
   const urlParams = new URLSearchParams(window.location.search);
@@ -156,11 +155,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 async function loadState() {
   userSettings = await storage.getSettings();
+  if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+    await new Promise(res => chrome.runtime.sendMessage({ action: 'SYNC_PERIOD_REMINDER' }, res));
+  }
   activeRemindersList = await storage.getReminders();
 
   const health = userSettings.healthSettings || {};
   let needsSync = false;
-  if (!activeRemindersList.some(r => r.id === 'auto_health_water')) needsSync = true;
+  if (health.waterEnabled !== false && !activeRemindersList.some(r => r.id === 'auto_health_water')) needsSync = true;
   if (health.eyeRestEnabled !== false && !activeRemindersList.some(r => r.id === 'auto_health_eye')) needsSync = true;
   if (health.postureEnabled !== false && !activeRemindersList.some(r => r.id === 'auto_health_posture')) needsSync = true;
 
@@ -185,6 +187,7 @@ async function populateCategoryDropdowns() {
   const filterElem = document.getElementById('mgr-filter-category');
 
   const defaultOptions = [
+    { value: 'health', label: '🩺 Health Hub' },
     { value: 'workout', label: '🏋️ Workout' },
     { value: 'study', label: '📚 Study' },
     { value: 'meetings', label: '📅 Meetings' },
@@ -195,7 +198,8 @@ async function populateCategoryDropdowns() {
 
   if (selectElem) {
     const currentVal = selectElem.value;
-    let html = defaultOptions.map(o => `<option value="${o.value}">${o.label}</option>`).join('');
+    let html = `<option value="" disabled ${!currentVal ? 'selected' : ''}>Select Category</option>`;
+    html += defaultOptions.map(o => `<option value="${o.value}">${o.label}</option>`).join('');
 
     userCustomCategories.forEach(c => {
       html += `<option value="${c.id}">${c.icon ? c.icon + ' ' : ''}${escapeHTML(c.label)}</option>`;
@@ -205,6 +209,8 @@ async function populateCategoryDropdowns() {
     selectElem.innerHTML = html;
     if (currentVal && selectElem.querySelector(`option[value="${currentVal}"]`)) {
       selectElem.value = currentVal;
+    } else if (!currentVal) {
+      selectElem.value = '';
     }
   }
 
@@ -253,7 +259,8 @@ async function refreshActiveTab() {
     renderDomainLists();
   }
   if (activeTab === 'tab-health') await renderHealthHub();
-  if (activeTab === 'tab-archive') renderArchiveTable();
+  if (activeTab === 'tab-archive') await renderArchiveTable();
+  if (activeTab === 'tab-settings') renderPrefsState();
 }
 
 function switchTab(targetTabId) {
@@ -310,7 +317,500 @@ async function renderUsageTimeline() {
 
   if (installDateEl) installDateEl.textContent = installDateStr;
   if (daysActiveEl) daysActiveEl.textContent = `${daysActive} Day${daysActive > 1 ? 's' : ''}`;
-  if (streakValEl) streakValEl.textContent = `${todayStats.streakDays || 1} Day${(todayStats.streakDays || 1) > 1 ? 's' : ''} 🔥`;
+  
+  if (streakValEl) {
+    const allDailyStats = await storage.getAllDailyStats();
+    const restorable = checkRestorableStreak(allDailyStats);
+    const completedToday = (todayStats.completedCount || 0) + (todayStats.waterGlasses || 0) + (todayStats.focusMinutesToday || 0);
+    const isDoneToday = completedToday > 0;
+    const streakDays = todayStats.streakDays || 0;
+    const isStreakBroken = streakDays <= 0 || (!isDoneToday && restorable);
+
+    if (isStreakBroken) {
+      streakValEl.textContent = `0 Days 🔥`;
+      streakValEl.style.color = '#94a3b8';
+      streakValEl.style.opacity = '0.6';
+    } else if (!isDoneToday) {
+      streakValEl.textContent = `${streakDays} Days 🔥`;
+      streakValEl.style.color = '#94a3b8';
+      streakValEl.style.opacity = '0.6';
+    } else {
+      streakValEl.textContent = `${streakDays} Day${streakDays === 1 ? '' : 's'} 🔥`;
+      streakValEl.style.color = '#f59e0b';
+      streakValEl.style.opacity = '1';
+    }
+  }
+}
+
+/* --- IN-PLACE DASHBOARD HANGMAN STREAK RESTORATION --- */
+const HANGMAN_WORDS = [
+  // --- ANIMALS (30) ---
+  { word: "DOLPHIN", category: "Animals 🐬", hint: "A 7-letter intelligent marine animal that loves jumping out of water!" },
+  { word: "ELEPHANT", category: "Animals 🐘", hint: "An 8-letter giant land animal with big ears and a long trunk!" },
+  { word: "PENGUIN", category: "Animals 🐧", hint: "A 7-letter flightless bird that loves swimming in icy waters!" },
+  { word: "KANGAROO", category: "Animals 🦘", hint: "An 8-letter Australian animal that hops around with a pouch for its baby!" },
+  { word: "GIRAFFE", category: "Animals 🦒", hint: "A 7-letter tall African animal with a super long neck to eat leaves!" },
+  { word: "TIGER", category: "Animals 🐅", hint: "A 5-letter wild orange big cat with dark black stripes!" },
+  { word: "CHEETAH", category: "Animals 🐆", hint: "A 7-letter spotted big cat known as the fastest land animal!" },
+  { word: "LEOPARD", category: "Animals 🐆", hint: "A 7-letter wild cat with dark rosette spots that climbs trees!" },
+  { word: "PANTHER", category: "Animals 🐆", hint: "A 7-letter sleek black big cat that hunts silently at night!" },
+  { word: "GORILLA", category: "Animals 🦍", hint: "A 7-letter powerful ape that lives in African rainforests!" },
+  { word: "HAMSTER", category: "Animals 🐹", hint: "A 7-letter cute small furry rodent that loves running on a wheel!" },
+  { word: "RABBIT", category: "Animals 🐰", hint: "A 6-letter fluffy animal with long ears that loves eating carrots!" },
+  { word: "SQUIRREL", category: "Animals 🐿️", hint: "An 8-letter bushy-tailed woodland animal that collects nuts!" },
+  { word: "PEACOCK", category: "Animals 🦚", hint: "A 7-letter colorful bird with large fan-like tail feathers!" },
+  { word: "FLAMINGO", category: "Animals 🦩", hint: "An 8-letter tall pink wading bird that stands on one leg!" },
+  { word: "OCTOPUS", category: "Animals 🐙", hint: "An 7-letter sea creature with eight flexible arms and blue blood!" },
+  { word: "JELLYFISH", category: "Animals 🪼", hint: "A 9-letter translucent sea creature with stinging tentacles!" },
+  { word: "LOBSTER", category: "Animals 🦞", hint: "A 7-letter hard-shelled marine creature with big claws!" },
+  { word: "TORTOISE", category: "Animals 🐢", hint: "An 8-letter slow-moving land reptile with a hard dome shell!" },
+  { word: "CHAMELEON", category: "Animals 🦎", hint: "A 9-letter lizard that can change color to blend into surroundings!" },
+  { word: "BUFFALO", category: "Animals 🦬", hint: "A 7-letter large wild horned ox found on plains and grasslands!" },
+  { word: "HEDGEHOG", category: "Animals 🦔", hint: "An 8-letter small nocturnal mammal covered in spiky quills!" },
+  { word: "PELICAN", category: "Animals 🐦", hint: "A 7-letter water bird with a large pouch under its beak to scoop fish!" },
+  { word: "WALRUS", category: "Animals 🦭", hint: "A 6-letter large Arctic marine mammal with long ivory tusks!" },
+  { word: "MEERKAT", category: "Animals 🦡", hint: "A 7-letter small desert mammal that stands upright on look-out!" },
+  { word: "RACCOON", category: "Animals 🦝", hint: "A 7-letter clever nocturnal animal with a black mask around its eyes!" },
+  { word: "OSTRICH", category: "Animals 🦤", hint: "A 7-letter giant flightless bird that can run super fast!" },
+  { word: "KOALA", category: "Animals 🐨", hint: "A 5-letter Australian tree-dwelling marsupial that eats eucalyptus!" },
+  { word: "SLOTH", category: "Animals 🦥", hint: "A 5-letter slow-moving tree mammal that hangs upside down!" },
+  { word: "ZEBRA", category: "Animals 🦓", hint: "A 5-letter wild African horse with distinct black and white stripes!" },
+
+  // --- FRUITS & VEGETABLES (25) ---
+  { word: "BANANA", category: "Fruit 🍌", hint: "A 6-letter long yellow fruit rich in potassium that monkeys love!" },
+  { word: "MANGO", category: "Fruit 🥭", hint: "A 5-letter juicy tropical stone fruit known as the king of fruits!" },
+  { word: "WATERMELON", category: "Fruit 🍉", hint: "A 10-letter large green juicy summer fruit with sweet red pulp!" },
+  { word: "STRAWBERRY", category: "Fruit 🍓", hint: "A 10-letter sweet red heart-shaped berry with tiny seeds outside!" },
+  { word: "PINEAPPLE", category: "Fruit 🍍", hint: "A 9-letter spiky tropical fruit with sweet yellow flesh!" },
+  { word: "AVOCADO", category: "Fruit 🥑", hint: "A 7-letter creamy green fruit with a large pit, used for guacamole!" },
+  { word: "BLUEBERRY", category: "Fruit 🫐", hint: "A 9-letter small round dark blue berry packed with antioxidants!" },
+  { word: "CHERRIES", category: "Fruit 🍒", hint: "An 8-letter pair of small sweet red stone fruits on slender stems!" },
+  { word: "COCONUT", category: "Fruit 🥥", hint: "A 7-letter hard brown tropical fruit filled with sweet water and milk!" },
+  { word: "GRAPEFRUIT", category: "Fruit 🍊", hint: "A 10-letter large citrus fruit with tangy pink or yellow pulp!" },
+  { word: "KIWIFRUIT", category: "Fruit 🥝", hint: "A 9-letter fuzzy brown fruit with bright green speckled interior!" },
+  { word: "POMEGRANATE", category: "Fruit 🍎", hint: "An 11-letter ruby red fruit filled with juicy edible seeds!" },
+  { word: "RASPBERRY", category: "Fruit 🫐", hint: "A 9-letter soft red berry with a sweet and tart flavor!" },
+  { word: "TANGERINE", category: "Fruit 🍊", hint: "A 9-letter small sweet orange citrus fruit that is easy to peel!" },
+  { word: "BROCCOLI", category: "Vegetables 🥦", hint: "An 8-letter green vegetable resembling tiny miniature trees!" },
+  { word: "CARROT", category: "Vegetables 🥕", hint: "A 6-letter crunchy orange root vegetable that is great for eyes!" },
+  { word: "CUCUMBER", category: "Vegetables 🥒", hint: "An 8-letter long green crisp vegetable packed with hydration!" },
+  { word: "EGGPLANT", category: "Vegetables 🍆", hint: "An 8-letter glossy purple vegetable used in Mediterranean dishes!" },
+  { word: "MUSHROOM", category: "Vegetables 🍄", hint: "An 8-letter cap-shaped edible fungus used in cooking!" },
+  { word: "POTATO", category: "Vegetables 🥔", hint: "A 6-letter starchy tuber vegetable used to make french fries!" },
+  { word: "PUMPKIN", category: "Vegetables 🎃", hint: "A 7-letter large round orange squash carved during Halloween!" },
+  { word: "SPINACH", category: "Vegetables 🥬", hint: "A 7-letter nutrient-rich green leafy vegetable that gives strength!" },
+  { word: "TOMATO", category: "Vegetables 🍅", hint: "A 6-letter juicy red fruit commonly eaten as a salad vegetable!" },
+  { word: "ZUCCHINI", category: "Vegetables 🥒", hint: "An 8-letter green summer squash variety popular in cooking!" },
+  { word: "GARLIC", category: "Vegetables 🧄", hint: "A 6-letter aromatic bulb vegetable with pungent cloves!" },
+
+  // --- FOODS & DESSERTS (25) ---
+  { word: "CHOCOLATE", category: "Treats 🍫", hint: "A 9-letter sweet brown treat made from cocoa beans!" },
+  { word: "PANCAKE", category: "Breakfast 🥞", hint: "A 7-letter flat round fluffy breakfast cake topped with syrup!" },
+  { word: "PIZZA", category: "Food 🍕", hint: "A 5-letter cheesy Italian dish served in triangular slices!" },
+  { word: "BURGER", category: "Food 🍔", hint: "A 6-letter grilled patty in a bun with lettuce and cheese!" },
+  { word: "SANDWICH", category: "Food 🥪", hint: "An 8-letter meal made of fillings between two slices of bread!" },
+  { word: "SPAGHETTI", category: "Food 🍝", hint: "A 9-letter long thin Italian pasta topped with savory sauce!" },
+  { word: "CUPCAKE", category: "Treats 🧁", hint: "A 7-letter small individual cake baked in a paper cup with frosting!" },
+  { word: "DONUT", category: "Treats 🍩", hint: "A 5-letter fried ring-shaped sweet pastry with glaze or sprinkles!" },
+  { word: "POPCORN", category: "Snacks 🍿", hint: "A 7-letter puffed corn snack popular at movie theaters!" },
+  { word: "ICECREAM", category: "Dessert 🍦", hint: "An 8-letter frozen dairy dessert served in cones or bowls!" },
+  { word: "WAFFLE", category: "Breakfast 🧇", hint: "A 6-letter grid-patterned crisp breakfast cake made from batter!" },
+  { word: "OMELLETTE", category: "Breakfast 🍳", hint: "A 9-letter dish of beaten eggs cooked with cheese and veggies!" },
+  { word: "NACHOS", category: "Snacks 🧀", hint: "A 6-letter crispy tortilla chip dish covered in melted cheese!" },
+  { word: "COOKIES", category: "Treats 🍪", hint: "A 7-letter baked sweet flat treat often filled with chocolate chips!" },
+  { word: "BROWNIE", category: "Treats 🟫", hint: "A 7-letter rich dense chocolate square dessert!" },
+  { word: "CROISSANT", category: "Bakery 🥐", hint: "A 9-letter flaky buttery crescent-shaped French pastry!" },
+  { word: "MACARONI", category: "Food 🧀", hint: "An 8-letter elbow-shaped pasta cooked with rich cheese sauce!" },
+  { word: "LASAGNA", category: "Food 🍝", hint: "A 7-letter baked Italian pasta dish layered with meat and cheese!" },
+  { word: "NOODLES", category: "Food 🍜", hint: "A 7-letter long thin strips of dough cooked in broth or fried!" },
+  { word: "BURRITO", category: "Food 🌯", hint: "A 7-letter Mexican wrapped flour tortilla stuffed with rice and beans!" },
+  { word: "TACOS", category: "Food 🌮", hint: "A 5-letter folded crispy tortilla stuffed with seasoned meat!" },
+  { word: "CHEESECAKE", category: "Dessert 🍰", hint: "A 10-letter rich dessert with a thick creamy cheese filling on crust!" },
+  { word: "MILKSHAKE", category: "Drinks 🥤", hint: "A 9-letter sweet cold beverage made of blended milk and ice cream!" },
+  { word: "SMOOTHIE", category: "Drinks 🥤", hint: "An 8-letter thick creamy beverage made from blended fresh fruit!" },
+  { word: "LEMONADE", category: "Drinks 🍋", hint: "An 8-letter refreshing drink made from lemon juice, water, and sugar!" },
+
+  // --- NATURE & SPACE (30) ---
+  { word: "RAINBOW", category: "Nature 🌈", hint: "A 7-letter colorful arc that appears in the sky after rain!" },
+  { word: "SUNSHINE", category: "Weather ☀️", hint: "An 8-letter bright warm light sent down to Earth from the sun!" },
+  { word: "MOUNTAIN", category: "Nature 🏔️", hint: "An 8-letter huge natural elevation of the Earth's surface with a peak!" },
+  { word: "OCEAN", category: "Nature 🌊", hint: "A 5-letter vast body of salty water covering most of the Earth!" },
+  { word: "VOLCANO", category: "Nature 🌋", hint: "A 7-letter mountain with an opening that erupts molten lava and ash!" },
+  { word: "WATERFALL", category: "Nature 🌊", hint: "A 9-letter cascade of water falling from a steep high cliff!" },
+  { word: "TORNADO", category: "Weather 🌪️", hint: "A 7-letter violently rotating column of air extending to the ground!" },
+  { word: "HURRICANE", category: "Weather 🌀", hint: "A 9-letter massive tropical storm system with powerful swirling winds!" },
+  { word: "LIGHTNING", category: "Weather ⚡", hint: "A 9-letter flash of electricity produced inside a thunderstorm cloud!" },
+  { word: "SNOWFLAKE", category: "Weather ❄️", hint: "A 9-letter delicate six-sided ice crystal falling from the sky!" },
+  { word: "ASTRONAUT", category: "Space 🧑‍🚀", hint: "A 9-letter person trained to travel and work in outer space!" },
+  { word: "SPACESHIP", category: "Space 🚀", hint: "A 9-letter vehicle designed for space travel beyond Earth!" },
+  { word: "SATELLITE", category: "Space 🛰️", hint: "A 9-letter object orbiting Earth to transmit communication signal!" },
+  { word: "TELESCOPE", category: "Space 🔭", hint: "A 9-letter optical device used to view distant stars and planets!" },
+  { word: "METEORITE", category: "Space ☄️", hint: "A 9-letter space rock that survives passage through atmosphere!" },
+  { word: "GALAXY", category: "Space 🌌", hint: "A 6-letter system of millions or billions of stars bound by gravity!" },
+  { word: "PLANET", category: "Space 🪐", hint: "A 6-letter large celestial body that orbits around a star!" },
+  { word: "STARLIGHT", category: "Space ✨", hint: "An 9-letter soft light coming from distant stars in night sky!" },
+  { word: "MOONLIGHT", category: "Space 🌙", hint: "A 9-letter silvery light reflected down from the moon at night!" },
+  { word: "FOREST", category: "Nature 🌲", hint: "A 6-letter large area covered densely with trees and wild plants!" },
+  { word: "JUNGLE", category: "Nature 🌿", hint: "A 6-letter dense tropical forest tangled with thick vegetation!" },
+  { word: "GLACIER", category: "Nature 🧊", hint: "A 7-letter slowly moving mass of ice formed by snow accumulation!" },
+  { word: "DESERT", category: "Nature 🏜️", hint: "A 6-letter dry barren land with low rainfall and sand dunes!" },
+  { word: "ISLAND", category: "Nature 🏝️", hint: "A 6-letter piece of land entirely surrounded by water!" },
+  { word: "VOLCANIC", category: "Nature 🌋", hint: "An 8-letter adjective relating to or produced by a volcano!" },
+  { word: "THUNDER", category: "Weather 🌩️", hint: "A 7-letter loud booming sound produced by lightning discharge!" },
+  { word: "BLIZZARD", category: "Weather 🌨️", hint: "An 8-letter severe snowstorm with strong winds and poor visibility!" },
+  { word: "SUNRISE", category: "Nature 🌅", hint: "A 7-letter daily appearance of the sun above the horizon in morning!" },
+  { word: "SUNSET", category: "Nature 🌇", hint: "A 6-letter daily disappearance of the sun below horizon in evening!" },
+  { word: "HORIZON", category: "Nature 🌅", hint: "A 7-letter line where the Earth's surface appears to meet the sky!" },
+
+  // --- GEOGRAPHY & PLACES (25) ---
+  { word: "PYRAMID", category: "Places 🔺", hint: "A 7-letter ancient triangular stone monument in Egypt!" },
+  { word: "CASTLE", category: "Places 🏰", hint: "A 6-letter large fortified medieval building with towers!" },
+  { word: "STADIUM", category: "Places 🏟️", hint: "A 7-letter large arena for sports events and concerts!" },
+  { word: "LIBRARY", category: "Places 📚", hint: "A 7-letter quiet building where books are kept for reading!" },
+  { word: "MUSEUM", category: "Places 🏛️", hint: "A 6-letter building displaying historical or artistic artifacts!" },
+  { word: "AIRPORT", category: "Places ✈️", hint: "A 7-letter location with runways for airplanes to land and take off!" },
+  { word: "HOSPITAL", category: "Places 🏥", hint: "An 8-letter medical institution where patients receive care!" },
+  { word: "AQUARIUM", category: "Places 🐠", hint: "An 8-letter facility with transparent tanks housing aquatic life!" },
+  { word: "CATHEDRAL", category: "Places ⛪", hint: "A 9-letter grand principal church with imposing architecture!" },
+  { word: "LIGHTHOUSE", category: "Places 🚨", hint: "A 10-letter tall tower with a bright light guiding ships near coast!" },
+  { word: "MONUMENT", category: "Places 🗽", hint: "An 8-letter structure built to commemorate a person or event!" },
+  { word: "SKYSCRAPER", category: "Places 🏙️", hint: "A 10-letter extremely tall multi-story building in a city skyline!" },
+  { word: "BRIDGES", category: "Places 🌉", hint: "A 7-letter structure built over water or roads to connect paths!" },
+  { word: "FOUNTAIN", category: "Places ⛲", hint: "An 8-letter decorative structure that shoots jets of water into air!" },
+  { word: "NATIONAL", category: "General 🏛️", hint: "An 8-letter word relating to a whole country or nation!" },
+  { word: "PARADISE", category: "Places 🏝️", hint: "An 8-letter place of supreme beauty, peace, and happiness!" },
+  { word: "TOWN", category: "Places 🏘️", hint: "A 4-letter urban area smaller than a city!" },
+  { word: "VILLAGE", category: "Places 🏡", hint: "A 7-letter small settlement in a rural setting!" },
+  { word: "CAPITAL", category: "Places 🏛️", hint: "A 7-letter city that serves as the seat of government!" },
+  { word: "HARBOR", category: "Places ⚓", hint: "A 6-letter sheltered port where ships dock safely!" },
+  { word: "HIGHWAY", category: "Places 🛣️", hint: "A 7-letter main public road connecting major towns and cities!" },
+  { word: "STATION", category: "Places 🚉", hint: "A 7-letter stopping place for trains or buses to pick up passengers!" },
+  { word: "KINGDOM", category: "Places 👑", hint: "A 7-letter country ruled by a king or queen!" },
+  { word: "EMPIRE", category: "Places ⚔️", hint: "A 6-letter extensive group of states under a single supreme authority!" },
+  { word: "TERRITORY", category: "Places 🗺️", hint: "A 9-letter area of land under the jurisdiction of a ruler or state!" },
+
+  // --- VEHICLES & TRANSPORT (15) ---
+  { word: "BICYCLE", category: "Transport 🚲", hint: "A 7-letter two-wheeled vehicle powered by pedaling!" },
+  { word: "MOTORCYCLE", category: "Transport 🏍️", hint: "A 10-letter two-wheeled motor vehicle for fast road travel!" },
+  { word: "HELICOPTER", category: "Transport 🚁", hint: "A 10-letter aircraft powered by large rotating overhead blades!" },
+  { word: "SUBMARINE", category: "Transport 🌊", hint: "A 9-letter naval vessel capable of operating deep underwater!" },
+  { word: "AMBULANCE", category: "Transport 🚑", hint: "A 9-letter emergency vehicle for transporting sick or injured people!" },
+  { word: "FIRETRUCK", category: "Transport 🚒", hint: "An 9-letter emergency vehicle equipped for fighting fires!" },
+  { word: "LOCOMOTIVE", category: "Transport 🚂", hint: "A 10-letter powered rail vehicle used for pulling trains!" },
+  { word: "SAILBOAT", category: "Transport ⛵", hint: "An 8-letter boat propelled primarily by sails caught in the wind!" },
+  { word: "SPACECRAFT", category: "Transport 🚀", hint: "A 10-letter vehicle designed for flight in outer space!" },
+  { word: "TRAM", category: "Transport 🚃", hint: "A 4-letter passenger rail vehicle running on tracks along city streets!" },
+  { word: "SCOOTER", category: "Transport 🛴", hint: "A 7-letter light two-wheeled vehicle with low step-through frame!" },
+  { word: "TRACTOR", category: "Transport 🚜", hint: "A 7-letter heavy motor vehicle with large tires used on farms!" },
+  { word: "GONDOLA", category: "Transport 🚣", hint: "A 7-letter traditional narrow flat-bottomed Venetian rowing boat!" },
+  { word: "AIRSHIP", category: "Transport 🎈", hint: "A 7-letter power-driven aircraft kept afloat by lighter-than-air gas!" },
+  { word: "CARAVAN", category: "Transport 🚐", hint: "A 7-letter vehicle equipped for living in while traveling!" },
+
+  // --- MUSIC & SPORTS (30) ---
+  { word: "GUITAR", category: "Music 🎸", hint: "A 6-letter string musical instrument played with fingers or a plectrum!" },
+  { word: "PIANO", category: "Music 🎹", hint: "A 5-letter keyboard instrument with black and white keys!" },
+  { word: "VIOLIN", category: "Music 🎻", hint: "A 6-letter wooden string instrument played with a horsehair bow!" },
+  { word: "TRUMPET", category: "Music 🎺", hint: "A 7-letter brass musical instrument with three valves!" },
+  { word: "DRUMS", category: "Music 🥁", hint: "A 5-letter percussion instruments played by striking with sticks!" },
+  { word: "SAXOPHONE", category: "Music 🎷", hint: "A 9-letter brass wind instrument popular in jazz music!" },
+  { word: "FLUTE", category: "Music 🪈", hint: "A 5-letter high-pitched woodwind instrument played by blowing across hole!" },
+  { word: "ACCORDION", category: "Music 🪗", hint: "A 9-letter portable box-shaped instrument played by expanding bellows!" },
+  { word: "HARMONICA", category: "Music 🪗", hint: "A 9-letter small mouth-blown wind instrument with metal reeds!" },
+  { word: "UKULELE", category: "Music 🪕", hint: "A 7-letter small four-stringed Hawaiian guitar!" },
+  { word: "ORCHESTRA", category: "Music 🎻", hint: "A 9-letter large classical ensemble of musicians playing instruments!" },
+  { word: "FOOTBALL", category: "Sports ⚽", hint: "An 8-letter team sport played by kicking a round ball into a goal!" },
+  { word: "BASKETBALL", category: "Sports 🏀", hint: "A 10-letter game played by shooting a ball through a raised hoop!" },
+  { word: "VOLLEYBALL", category: "Sports 🏐", hint: "A 10-letter sport where teams hit a ball over a high net with hands!" },
+  { word: "BADMINTON", category: "Sports 🏸", hint: "A 9-letter racket sport played by hitting a shuttlecock over net!" },
+  { word: "MARATHON", category: "Sports 🏃", hint: "An 8-letter long-distance running race over 26.2 miles!" },
+  { word: "SWIMMING", category: "Sports 🏊", hint: "An 8-letter sport or activity of propelling oneself through water!" },
+  { word: "GYMNASTICS", category: "Sports 🤸", hint: "A 10-letter sport involving exercises demonstrating balance and agility!" },
+  { word: "SKATEBOARD", category: "Sports 🛹", hint: "A 10-letter narrow board with wheels used for riding and tricks!" },
+  { word: "SURFING", category: "Sports 🏄", hint: "A 7-letter sport of riding ocean waves while standing on a board!" },
+  { word: "ARCHERY", category: "Sports 🏹", hint: "A 7-letter sport of shooting arrows with a bow at a target!" },
+  { word: "BOWLING", category: "Sports 🎳", hint: "A 7-letter game of rolling a heavy ball down a lane to knock down pins!" },
+  { word: "ATHLETICS", category: "Sports 🏃", hint: "A 9-letter collection of competitive sporting events like running and jumping!" },
+  { word: "CHAMPION", category: "Success 🏆", hint: "An 8-letter title for the winner of a tournament or contest!" },
+  { word: "VICTORY", category: "Success 🏆", hint: "A 7-letter word for winning a challenge or achieving a great triumph!" },
+  { word: "TROPHY", category: "Success 🏆", hint: "A 6-letter prize or cup awarded to celebrate a victory!" },
+  { word: "MEDAL", category: "Success 🥇", hint: "A 5-letter metal disc awarded for bravery or sporting excellence!" },
+  { word: "TOURNAMENT", category: "Sports 🏟️", hint: "A 10-letter series of contests between several competitors!" },
+  { word: "ATHLETE", category: "Sports 🏃", hint: "A 7-letter person who is proficient in sports and physical exercise!" },
+  { word: "STADIUM", category: "Sports 🏟️", hint: "A 7-letter venue for sports competitions with seating for spectators!" },
+
+  // --- EVERYDAY OBJECTS & FUN CONCEPTS (30) ---
+  { word: "BALLOON", category: "Party 🎈", hint: "A 7-letter inflatable rubber bag filled with air or helium!" },
+  { word: "JOURNEY", category: "Travel 🧳", hint: "A 7-letter word for traveling from one place to another!" },
+  { word: "TREASURE", category: "Adventure 🪙", hint: "An 8-letter collection of valuable gold, jewels, or precious items!" },
+  { word: "DIAMOND", category: "Gems 💎", hint: "A 7-letter precious crystal gemstone known for exceptional hardness!" },
+  { word: "COMPASS", category: "Tools 🧭", hint: "A 7-letter navigation tool with a magnetic needle pointing north!" },
+  { word: "KEYBOARD", category: "Items ⌨️", hint: "An 8-letter panel of keys used to type input into computers!" },
+  { word: "UMBRELLA", category: "Items ☂️", hint: "An 8-letter folding canopy used to protect from rain or sunlight!" },
+  { word: "CALENDAR", category: "Items 📅", hint: "An 8-letter chart displaying dates, days, and months of the year!" },
+  { word: "BACKPACK", category: "Items 🎒", hint: "An 8-letter bag carried on one's back with shoulder straps!" },
+  { word: "BINOCULARS", category: "Tools 🔭", hint: "A 10-letter optical instrument with two lenses for viewing far objects!" },
+  { word: "SUNGLASSES", category: "Items 🕶️", hint: "A 10-letter protective eyewear with tinted lenses against sunlight!" },
+  { word: "LANTERN", category: "Items 🏮", hint: "A 7-letter portable lamp with a protective case for outdoor light!" },
+  { word: "HOURGLASS", category: "Items ⏳", hint: "A 9-letter glass timer with trickling sand measuring an hour!" },
+  { word: "FIREWORKS", category: "Party 🎆", hint: "An 9-letter explosive device creating colorful lights and noises!" },
+  { word: "CAROUSEL", category: "Fun 🎠", hint: "An 8-letter revolving amusement ride with wooden horses!" },
+  { word: "ADVENTURE", category: "Fun 🤠", hint: "A 9-letter exciting and unusual experience full of exploration!" },
+  { word: "DISCOVERY", category: "Fun 🔍", hint: "A 9-letter act of finding or learning something new for the first time!" },
+  { word: "HARMONY", category: "Life 🎵", hint: "A 7-letter pleasing arrangement of parts or peaceful agreement!" },
+  { word: "CREATIVITY", category: "Mind 🎨", hint: "A 10-letter ability to use imagination to create original ideas!" },
+  { word: "KNOWLEDGE", category: "Mind 📚", hint: "A 9-letter information and skills acquired through learning!" },
+  { word: "FRIENDSHIP", category: "Life 🤝", hint: "A 10-letter bond of mutual affection between people!" },
+  { word: "HAPPINESS", category: "Life 😊", hint: "A 9-letter state of feeling joyful, content, and happy!" },
+  { word: "CURIOSITY", category: "Mind 🧐", hint: "A 9-letter strong desire to know, learn, or discover things!" },
+  { word: "CELEBRATE", category: "Party 🎉", hint: "A 9-letter action to perform festivities for a special occasion!" },
+  { word: "EXPLORER", category: "Adventure 🧭", hint: "An 8-letter person who travels into unfamiliar regions to learn!" },
+  { word: "WONDERLAND", category: "Fun 🏰", hint: "A 10-letter imaginary land full of magical and marvelous things!" },
+  { word: "SUNRISE", category: "Nature 🌅", hint: "A 7-letter daily morning appearance of the sun above horizon!" },
+  { word: "MOONBEAM", category: "Nature 🌙", hint: "An 8-letter ray of moonlight shining down from the sky!" },
+  { word: "MIRACLE", category: "Life ✨", hint: "A 7-letter extraordinary event bringing wonder and joy!" },
+  { word: "HARVEST", category: "Nature 🌾", hint: "A 7-letter process of gathering ripe crops from fields!" }
+];
+
+let dashHangmanState = {
+  selectedItem: {},
+  guessedLetters: new Set(),
+  wrongCount: 0,
+  maxWrong: 6,
+  attemptsLeft: 3,
+  isGameActive: false,
+  missedDateKey: null
+};
+
+// Bind physical computer keyboard listener for Hangman typing ('A'-'Z')
+if (typeof window !== 'undefined') {
+  window.addEventListener('keydown', (e) => {
+    const gameBox = document.getElementById('dash-hangman-game-box');
+    if (!gameBox || gameBox.style.display !== 'block' || !dashHangmanState.isGameActive) return;
+
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable)) return;
+
+    if (/^[a-zA-Z]$/.test(e.key)) {
+      e.preventDefault();
+      handleDashLetterGuess(e.key.toUpperCase());
+    }
+  });
+}
+
+function updateAttemptsBadge() {
+  const badge = document.getElementById('dash-attempts-badge');
+  if (badge) {
+    badge.textContent = `❤️ Attempts: ${dashHangmanState.attemptsLeft}/3`;
+  }
+}
+
+function startDashHangmanGame() {
+  if (dashHangmanState.attemptsLeft <= 0) return;
+
+  dashHangmanState.guessedLetters.clear();
+  dashHangmanState.wrongCount = 0;
+  dashHangmanState.isGameActive = true;
+  updateAttemptsBadge();
+
+  const statusEl = document.getElementById('dash-hangman-status');
+  if (statusEl) {
+    statusEl.textContent = "";
+    statusEl.style.color = "var(--text-primary)";
+  }
+
+  const retryContainer = document.getElementById('dash-retry-container');
+  if (retryContainer) {
+    retryContainer.style.display = 'none';
+    retryContainer.innerHTML = '';
+  }
+
+  // Reset SVG parts
+  for (let i = 0; i < dashHangmanState.maxWrong; i++) {
+    const el = document.getElementById(`dash-hp-${i}`);
+    if (el) el.style.display = "none";
+  }
+
+  dashHangmanState.selectedItem = HANGMAN_WORDS[Math.floor(Math.random() * HANGMAN_WORDS.length)];
+  const catEl = document.getElementById('dash-hangman-category');
+  if (catEl) catEl.textContent = `Category: ${dashHangmanState.selectedItem.category}`;
+
+  const hintEl = document.getElementById('dash-hangman-hint');
+  if (hintEl) hintEl.textContent = `💡 Hint: ${dashHangmanState.selectedItem.hint}`;
+
+  renderDashHangmanWord();
+  renderDashHangmanKeyboard();
+}
+
+function handleDashLetterGuess(letter) {
+  if (!dashHangmanState.isGameActive || dashHangmanState.guessedLetters.has(letter)) return;
+
+  dashHangmanState.guessedLetters.add(letter);
+  const btn = document.querySelector(`.dash-key-btn[data-key="${letter}"]`);
+  if (btn) btn.disabled = true;
+
+  if (!dashHangmanState.selectedItem.word.includes(letter)) {
+    if (btn) {
+      btn.style.background = 'rgba(239, 68, 68, 0.2)';
+      btn.style.color = '#ef4444';
+    }
+    const partEl = document.getElementById(`dash-hp-${dashHangmanState.wrongCount}`);
+    if (partEl) partEl.style.display = "block";
+    dashHangmanState.wrongCount++;
+
+    if (dashHangmanState.wrongCount >= dashHangmanState.maxWrong) {
+      dashHangmanState.isGameActive = false;
+      dashHangmanState.attemptsLeft--;
+      updateAttemptsBadge();
+
+      const statusEl = document.getElementById('dash-hangman-status');
+      const retryContainer = document.getElementById('dash-retry-container');
+
+      if (dashHangmanState.attemptsLeft > 0) {
+        if (statusEl) {
+          statusEl.innerHTML = `❌ Attempt Failed! The word was <strong>${dashHangmanState.selectedItem.word}</strong>.`;
+          statusEl.style.color = "#ef4444";
+        }
+        if (retryContainer) {
+          retryContainer.style.display = 'block';
+          retryContainer.innerHTML = `
+            <button class="btn btn-secondary btn-sm" id="btn-dash-retry-hangman" style="width: 100%; font-weight: 700; font-size: 0.775rem; padding: 6px 12px; background: rgba(245,158,11,0.12); color: #f59e0b; border: 1px solid rgba(245,158,11,0.3); border-radius: 8px; cursor: pointer; transition: all 0.2s ease;">
+              🔄 Try Next Attempt (${dashHangmanState.attemptsLeft}/3 left)
+            </button>
+          `;
+          document.getElementById('btn-dash-retry-hangman')?.addEventListener('click', startDashHangmanGame);
+        }
+      } else {
+        const lostStreak = dashHangmanState.pastStreakValue || 1;
+        if (statusEl) {
+          statusEl.innerHTML = `💔 <strong>All 3 attempts used!</strong> Your ${lostStreak}-Day Streak is permanently lost.`;
+          statusEl.style.color = "#ef4444";
+        }
+        if (retryContainer) {
+          retryContainer.style.display = 'none';
+          retryContainer.innerHTML = '';
+        }
+
+        if (dashHangmanState.missedDateKey) {
+          try {
+            localStorage.setItem(`streak_failed_permanently_${dashHangmanState.missedDateKey}`, 'true');
+          } catch (e) {}
+        }
+
+        setTimeout(() => {
+          renderOverview();
+        }, 3000);
+      }
+      disableDashHangmanKeys();
+    }
+  } else {
+    if (btn) {
+      btn.style.background = 'rgba(16, 185, 129, 0.2)';
+      btn.style.color = '#10b981';
+    }
+  }
+
+  renderDashHangmanWord();
+}
+
+function renderDashHangmanWord() {
+  const wordBox = document.getElementById('dash-hangman-word');
+  if (!wordBox) return;
+  wordBox.innerHTML = "";
+  let isWin = true;
+
+  for (const char of dashHangmanState.selectedItem.word) {
+    const slot = document.createElement('div');
+    slot.style.width = '36px';
+    slot.style.height = '46px';
+    slot.style.borderBottom = '4px solid #f59e0b';
+    slot.style.background = 'rgba(245, 158, 11, 0.12)';
+    slot.style.borderRadius = '6px 6px 0 0';
+    slot.style.display = 'flex';
+    slot.style.alignItems = 'center';
+    slot.style.justifyContent = 'center';
+    slot.style.fontSize = '1.35rem';
+    slot.style.fontWeight = '800';
+    slot.style.color = 'var(--text-primary)';
+    slot.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+
+    if (dashHangmanState.guessedLetters.has(char)) {
+      slot.textContent = char;
+    } else {
+      slot.textContent = "\u00A0";
+      isWin = false;
+    }
+    wordBox.appendChild(slot);
+  }
+
+  if (isWin && dashHangmanState.selectedItem.word && dashHangmanState.wrongCount < dashHangmanState.maxWrong && dashHangmanState.isGameActive) {
+    dashHangmanState.isGameActive = false;
+    const statusEl = document.getElementById('dash-hangman-status');
+    if (statusEl) {
+      statusEl.textContent = "🎉 Word Solved! Restoring your streak...";
+      statusEl.style.color = "#10b981";
+    }
+    disableDashHangmanKeys();
+    handleDashStreakRestoration();
+  }
+}
+
+function renderDashHangmanKeyboard() {
+  const kbBox = document.getElementById('dash-hangman-keyboard');
+  if (!kbBox) return;
+  kbBox.innerHTML = "";
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+  for (const letter of alphabet) {
+    const btn = document.createElement('button');
+    btn.textContent = letter;
+    btn.className = 'btn btn-ghost btn-sm dash-key-btn';
+    btn.dataset.key = letter;
+    btn.style.width = '34px';
+    btn.style.height = '34px';
+    btn.style.padding = '0';
+    btn.style.fontWeight = '700';
+
+    if (dashHangmanState.guessedLetters.has(letter)) {
+      btn.disabled = true;
+      btn.style.opacity = '0.4';
+    }
+
+    btn.addEventListener('click', () => {
+      handleDashLetterGuess(letter);
+    });
+
+    kbBox.appendChild(btn);
+  }
+}
+
+function disableDashHangmanKeys() {
+  const kbBox = document.getElementById('dash-hangman-keyboard');
+  if (kbBox) {
+    kbBox.querySelectorAll('button').forEach(b => b.disabled = true);
+  }
+}
+
+async function handleDashStreakRestoration() {
+  try {
+    const allStats = await storage.getAllDailyStats();
+    const restorable = checkRestorableStreak(allStats);
+    if (restorable) {
+      await storage.updateDailyStatsForDate(restorable.missedDateKey, curr => ({
+        ...curr,
+        completedCount: Math.max(1, curr.completedCount || 0),
+        restoredStreak: true
+      }));
+
+      if (typeof chrome !== 'undefined' && chrome.runtime) {
+        chrome.runtime.sendMessage({ action: 'REFRESH_ALARMS' }).catch(() => {});
+      }
+
+      showToast(`🎉 Streak Restored! Your streak has been successfully recovered 💕`, 'success', 6000);
+      userSettings = await storage.getSettings();
+      renderOverview();
+    }
+  } catch (e) {
+    console.error("Failed to restore streak:", e);
+  }
 }
 
 /* --- TAB 1: OVERVIEW --- */
@@ -320,8 +820,66 @@ async function renderOverview() {
   if (scoreEl) scoreEl.style.display = 'none';
   const kpiDone = document.getElementById('dash-kpi-done');
   if (kpiDone) kpiDone.textContent = stats.completedCount || 0;
-  document.getElementById('dash-kpi-streak').textContent = `${stats.streakDays || 1} Days 🔥`;
-  document.getElementById('dash-kpi-focus').textContent = `${stats.focusMinutesToday || 0} Min`;
+  const kpiFocus = document.getElementById('dash-kpi-focus');
+  if (kpiFocus) kpiFocus.textContent = `${stats.focusMinutesToday || 0} Min`;
+  // Restorable Streak Banner Check
+  const allDailyStats = await storage.getAllDailyStats();
+  const restorable = checkRestorableStreak(allDailyStats);
+  const restoreCard = document.getElementById('dash-streak-restore-card');
+  const restoreValEl = document.getElementById('dash-restore-days-val');
+
+  if (restorable) {
+    if (dashHangmanState.missedDateKey !== restorable.missedDateKey) {
+      dashHangmanState.missedDateKey = restorable.missedDateKey;
+      dashHangmanState.attemptsLeft = 3;
+      dashHangmanState.isGameActive = false;
+    }
+    dashHangmanState.pastStreakValue = restorable.pastStreakValue;
+    if (restoreCard) restoreCard.style.display = 'block';
+    if (restoreValEl) restoreValEl.textContent = restorable.pastStreakValue;
+  } else {
+    if (restoreCard) restoreCard.style.display = 'none';
+  }
+
+  const completedToday = (stats.completedCount || 0) + (stats.waterGlasses || 0) + (stats.focusMinutesToday || 0);
+  const isDoneToday = completedToday > 0;
+  const streakDays = stats.streakDays || 0;
+  const isStreakBroken = streakDays <= 0 || (!isDoneToday && restorable);
+
+  const streakKpiEl = document.getElementById('dash-kpi-streak');
+  if (streakKpiEl) {
+    if (isStreakBroken) {
+      streakKpiEl.textContent = `0 Days 🔥`;
+      streakKpiEl.style.color = '#94a3b8';
+      streakKpiEl.style.opacity = '0.6';
+      streakKpiEl.style.filter = 'grayscale(100%)';
+    } else if (!isDoneToday) {
+      streakKpiEl.textContent = `${streakDays} Days 🔥`;
+      streakKpiEl.style.color = '#94a3b8';
+      streakKpiEl.style.opacity = '0.6';
+      streakKpiEl.style.filter = 'grayscale(100%)';
+    } else {
+      streakKpiEl.textContent = `${streakDays} Day${streakDays === 1 ? '' : 's'} 🔥`;
+      streakKpiEl.style.color = '#f59e0b';
+      streakKpiEl.style.opacity = '1';
+      streakKpiEl.style.filter = 'none';
+    }
+  }
+
+  // Bind Open Hangman Toggle
+  const btnHangman = document.getElementById('btn-dash-open-hangman');
+  if (btnHangman) {
+    btnHangman.onclick = () => {
+      const gameBox = document.getElementById('dash-hangman-game-box');
+      if (gameBox) {
+        const isVisible = gameBox.style.display === 'block';
+        gameBox.style.display = isVisible ? 'none' : 'block';
+        if (!isVisible) {
+          startDashHangmanGame();
+        }
+      }
+    };
+  }
   
   const waterGoal = userSettings.healthSettings?.waterGoal || userSettings.waterGoalGlasses || 8;
   const currentWater = stats.waterGlasses || 0;
@@ -391,6 +949,7 @@ async function updateDashboardFocusWidget() {
 
       controlsBox.innerHTML = `
         <span style="font-size: 1.4rem; font-family: var(--font-display); font-weight: 700; color: #10b981;" id="dash-focus-timer-clock">--:--</span>
+        <button class="btn btn-ghost btn-sm" id="btn-dash-pin-focus" style="padding: 4px 8px; border: none; background: transparent; opacity: ${focusState.pinned !== false ? '1' : '0.45'}; font-size: 1.1rem;" title="${focusState.pinned !== false ? 'Unpin Clock' : 'Pin Clock'}">📌</button>
         <button class="btn btn-secondary btn-sm" id="btn-dash-pause-focus">⏸ Pause</button>
         <button class="btn btn-danger btn-sm" id="btn-dash-stop-focus">Stop</button>
       `;
@@ -399,8 +958,13 @@ async function updateDashboardFocusWidget() {
         const remainingMs = focusState.endTime - Date.now();
         if (remainingMs <= 0) {
           clearInterval(dashFocusInterval);
-          updateDashboardFocusWidget();
-          renderOverview();
+          if (typeof chrome !== 'undefined' && chrome.runtime) {
+            chrome.runtime.sendMessage({ action: 'COMPLETE_FOCUS_MODE' }, async () => {
+              showToast('🎉 Focus session completed! Outstanding work!', 'success');
+              await updateDashboardFocusWidget();
+              renderOverview();
+            });
+          }
           return;
         }
         const totalSec = Math.floor(remainingMs / 1000);
@@ -415,6 +979,13 @@ async function updateDashboardFocusWidget() {
       tick();
       dashFocusInterval = setInterval(tick, 1000);
 
+      document.getElementById('btn-dash-pin-focus')?.addEventListener('click', async () => {
+        if (typeof chrome !== 'undefined' && chrome.runtime) {
+          chrome.runtime.sendMessage({ action: 'TOGGLE_PIN_FOCUS_CLOCK' }, async () => {
+            await updateDashboardFocusWidget();
+          });
+        }
+      });
       document.getElementById('btn-dash-pause-focus')?.addEventListener('click', async () => {
         if (typeof chrome !== 'undefined' && chrome.runtime) {
           chrome.runtime.sendMessage({ action: 'PAUSE_FOCUS_MODE' }, async () => {
@@ -437,17 +1008,15 @@ async function updateDashboardFocusWidget() {
     statusLabel.textContent = 'Focus Mode Idle';
     if (desc) desc.textContent = 'Silence non-critical distractions while in deep work flow.';
     controlsBox.innerHTML = `
-      <div id="row-dash-focus-btns" style="display: flex; flex-direction: column; gap: 4px; min-width: 90px;">
-        <button class="btn btn-primary btn-sm" id="btn-dash-focus-25" style="width: 100%;">25m</button>
-        <button class="btn btn-secondary btn-sm" id="btn-dash-focus-45" style="width: 100%;">45m</button>
-        <button class="btn btn-ghost btn-sm" id="btn-dash-show-custom" style="width: 100%;">Custom</button>
+      <div id="row-dash-focus-btns" style="display: flex; flex-direction: row; align-items: center; justify-content: flex-end; gap: 8px;">
+        <button class="btn btn-primary btn-sm" id="btn-dash-focus-25" style="padding: 6px 14px;">25m</button>
+        <button class="btn btn-secondary btn-sm" id="btn-dash-focus-45" style="padding: 6px 14px;">45m</button>
+        <button class="btn btn-ghost btn-sm" id="btn-dash-show-custom" style="padding: 6px 12px;">Custom</button>
       </div>
-      <div id="box-dash-custom-focus" style="display: none; flex-direction: column; gap: 4px; min-width: 90px;">
-        <input type="number" id="dash-input-custom-focus" class="input-field" placeholder="Minutes" min="1" max="480" style="width: 100%; height: 32px; padding: 4px 8px; font-size: 0.85rem;">
-        <div style="display: flex; gap: 4px; width: 100%;">
-          <button class="btn btn-primary btn-sm" id="btn-dash-focus-custom" style="flex: 1; height: 32px;">▶ Start</button>
-          <button class="btn btn-ghost btn-sm" id="btn-dash-cancel-custom" style="height: 32px; padding: 4px 8px;">✕</button>
-        </div>
+      <div id="box-dash-custom-focus" style="display: none; flex-direction: row; align-items: center; justify-content: flex-end; gap: 8px;">
+        <input type="number" id="dash-input-custom-focus" class="input-field" placeholder="Mins" min="1" max="480" style="width: 75px; height: 34px; padding: 4px 8px; font-size: 0.85rem;">
+        <button class="btn btn-primary btn-sm" id="btn-dash-focus-custom" style="height: 34px; padding: 0 14px;">▶ Start</button>
+        <button class="btn btn-ghost btn-sm" id="btn-dash-cancel-custom" style="height: 34px; padding: 0 8px;">✕</button>
       </div>
     `;
 
@@ -486,6 +1055,32 @@ async function startDashFocus(minutes) {
   }
 }
 
+function updateUndoTimerCountdown() {
+  const cardUndoBtn = document.getElementById('period-card-undo-btn');
+  if (!cardUndoBtn) return;
+
+  const pc = userSettings?.periodTracker || {};
+  if (!pc.previousLastPeriodDate || !pc.periodLoggedAt) {
+    cardUndoBtn.style.display = 'none';
+    return;
+  }
+
+  const TEN_MINUTES_MS = 10 * 60 * 1000;
+  const elapsed = Date.now() - pc.periodLoggedAt;
+  const remainingMs = TEN_MINUTES_MS - elapsed;
+
+  if (remainingMs > 0) {
+    const remSec = Math.ceil(remainingMs / 1000);
+    const mins = Math.floor(remSec / 60);
+    const secs = remSec % 60;
+    const timeStr = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    cardUndoBtn.innerHTML = `↩️ Undo Last Log (${timeStr})`;
+    cardUndoBtn.style.display = 'inline-block';
+  } else {
+    cardUndoBtn.style.display = 'none';
+  }
+}
+
 function updateAllLiveCountdowns() {
   document.querySelectorAll('.live-countdown').forEach(el => {
     const ts = parseInt(el.dataset.timestamp, 10);
@@ -493,13 +1088,43 @@ function updateAllLiveCountdowns() {
       el.textContent = formatRelativeTime(ts);
     }
   });
+  updateUndoTimerCountdown();
+}
+
+function parseLocalDate(dateStr) {
+  if (!dateStr) return new Date();
+  const parts = String(dateStr).split('-');
+  if (parts.length === 3) {
+    return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+  }
+  const d = new Date(dateStr);
+  d.setHours(0, 0, 0, 0);
+  return d;
 }
 
 function renderTodayTasksTable() {
   const box = document.getElementById('dash-today-reminders-box');
   if (!box) return;
 
-  const todayReminders = activeRemindersList.filter(r => r.enabled && r.id !== 'auto_health_water');
+  const todayReminders = activeRemindersList.filter(r => {
+    if (!r.enabled) return false;
+    if (r.id === 'auto_health_water') return false;
+    if (r.id === 'auto_period_reminder' || r.isPeriodReminder) {
+      const pc = userSettings.periodTracker || {};
+      const profile = userSettings.userProfile || {};
+      if (profile.gender !== 'female' || !pc.trackingEnabled || !pc.lastPeriodDate) return false;
+      const remindDays = pc.remindDaysBefore ?? 3;
+      const cycleLength = pc.cycleLength || 28;
+      const today = new Date(); today.setHours(0,0,0,0);
+      const last = parseLocalDate(pc.lastPeriodDate);
+      const daysSince = Math.floor((today - last) / 86400000);
+      const cyclesSince = Math.floor(daysSince / cycleLength);
+      const nextPeriod = new Date(last.getTime() + (cyclesSince + 1) * cycleLength * 86400000);
+      const diffDays = Math.ceil((nextPeriod.getTime() - today.getTime()) / 86400000);
+      if (diffDays > remindDays) return false;
+    }
+    return true;
+  });
 
   if (todayReminders.length === 0) {
     safeSetHTML(box, `
@@ -534,7 +1159,7 @@ function renderTodayTasksTable() {
         <td><span class="badge ${prio.badgeClass}">${prio.label}</span></td>
         <td><span class="live-countdown" data-timestamp="${rem.time}" style="font-weight: 600; color: #38bdf8;">${formatRelativeTime(rem.time)}</span></td>
         <td>
-          <button class="btn btn-secondary btn-sm dash-act-done" data-id="${rem.id}" style="padding: 4px 10px; font-size: 0.75rem;">Done ✓</button>
+          <button class="btn btn-secondary btn-sm dash-act-done" data-id="${rem.id}" style="padding: 4px 10px; font-size: 0.75rem;">${rem.category === 'period' ? 'Got It 👍' : 'Done ✓'}</button>
           ${(() => {
             const snoozeMins = userSettings?.defaultSnoozeMinutes || 10;
             const snoozeLabel = snoozeMins >= 60 ? (snoozeMins / 60) + 'h' : snoozeMins + 'm';
@@ -597,6 +1222,16 @@ function initRemindersManager() {
   document.getElementById('edit-rem-date')?.addEventListener('change', refreshModalLivePreview);
   document.getElementById('edit-rem-time')?.addEventListener('change', refreshModalLivePreview);
   document.getElementById('edit-rem-interval')?.addEventListener('input', refreshModalLivePreview);
+
+  document.getElementById('mgr-search-input')?.addEventListener('input', () => {
+    renderRemindersTable();
+  });
+  document.getElementById('mgr-filter-category')?.addEventListener('change', () => {
+    renderRemindersTable();
+  });
+  document.getElementById('mgr-filter-priority')?.addEventListener('change', () => {
+    renderRemindersTable();
+  });
 
   document.getElementById('edit-rem-custom-emoji')?.addEventListener('input', (e) => {
     const chars = Array.from(e.target.value);
@@ -743,17 +1378,45 @@ function renderRemindersTable() {
   const prioFilter = document.getElementById('mgr-filter-priority').value;
 
   const filtered = activeRemindersList.filter(rem => {
+    if (rem.id === 'auto_period_reminder' || rem.isPeriodReminder || rem.category === 'period') {
+      if (rem.enabled === false) return false;
+      const pc = userSettings.periodTracker || {};
+      const profile = userSettings.userProfile || {};
+      if (profile.gender !== 'female' || !pc.trackingEnabled || !pc.lastPeriodDate) return false;
+
+      const remindDays = pc.remindDaysBefore ?? 3;
+      const cycleLength = pc.cycleLength || 28;
+      const today = new Date(); today.setHours(0,0,0,0);
+      const last = parseLocalDate(pc.lastPeriodDate);
+      const daysSince = Math.floor((today - last) / 86400000);
+      const cyclesSince = Math.floor(daysSince / cycleLength);
+      const nextPeriod = new Date(last.getTime() + (cyclesSince + 1) * cycleLength * 86400000);
+      const diffDays = Math.ceil((nextPeriod.getTime() - today.getTime()) / 86400000);
+
+      if (diffDays > remindDays) return false;
+    }
     const matchesSearch = rem.title.toLowerCase().includes(searchQuery) || 
                           (rem.description && rem.description.toLowerCase().includes(searchQuery));
-    const matchesCat = catFilter === 'all' || rem.category === catFilter;
+    const matchesCat = catFilter === 'all' || 
+                       (catFilter === 'health' && (['water', 'medicine', 'health', 'eye', 'posture'].includes(rem.category) || rem.id.startsWith('auto_health_') || rem.id.startsWith('med_rem_'))) ||
+                       rem.category === catFilter;
     const matchesPrio = prioFilter === 'all' || rem.priority === prioFilter;
     return matchesSearch && matchesCat && matchesPrio;
+  });
+
+  // Sort Health Hub reminders to the top
+  filtered.sort((a, b) => {
+    const aHealth = a.id.startsWith('auto_health_') || a.id.startsWith('med_rem_') || a.id === 'auto_period_reminder' || ['water', 'medicine', 'health', 'eye', 'posture'].includes(a.category);
+    const bHealth = b.id.startsWith('auto_health_') || b.id.startsWith('med_rem_') || b.id === 'auto_period_reminder' || ['water', 'medicine', 'health', 'eye', 'posture'].includes(b.category);
+    if (aHealth && !bHealth) return -1;
+    if (!aHealth && bHealth) return 1;
+    return 0;
   });
 
   if (filtered.length === 0) {
     safeSetHTML(tbody, `
       <tr>
-        <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 32px;">
+        <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 32px;">
           No matching reminders found.
         </td>
       </tr>
@@ -761,7 +1424,7 @@ function renderRemindersTable() {
     return;
   }
 
-  const html = filtered.map(rem => {
+  const html = filtered.map((rem, index) => {
     const cat = getCategoryDetails(rem.category, userCustomCategories);
     const prio = PRIORITIES[rem.priority?.toUpperCase()] || PRIORITIES.MEDIUM;
     const cleanTitle = cleanReminderTitle(rem.title);
@@ -769,39 +1432,51 @@ function renderRemindersTable() {
     const isFixedHealth = rem.id.startsWith('auto_health_') || rem.id.startsWith('med_rem_') || rem.id === 'auto_period_reminder' || ['water', 'medicine', 'health', 'eye', 'posture'].includes(rem.category);
     
     const editBtnHtml = isFixedHealth
-      ? `<button class="btn btn-ghost btn-sm mgr-act-goto-health" style="color: #f472b6;" title="Edit in Health Hub tab">🩺 Edit in Health Hub</button>`
-      : `<button class="btn btn-ghost btn-sm mgr-act-edit" data-id="${rem.id}">✏️ Edit</button>`;
+      ? `<button class="btn-health-hub-link mgr-act-goto-health" title="Edit in Health Hub tab">Health Hub</button>`
+      : `<button class="btn-icon-action mgr-act-edit" data-id="${rem.id}" title="Edit Reminder">✏️</button>`;
 
     const deleteBtnHtml = isFixedHealth 
       ? '' 
-      : `<button class="btn btn-danger btn-sm mgr-act-del" data-id="${rem.id}">🗑️ Delete</button>`;
+      : `<button class="btn-icon-action btn-del-action mgr-act-del" data-id="${rem.id}" title="Delete Reminder">🗑️</button>`;
 
     const isPassedOneTime = (rem.repeat === 'once' || !rem.repeat) && rem.time && rem.time < now && !isFixedHealth;
+    const isPaused = rem.enabled === false;
 
     const toggleBtnHtml = isPassedOneTime
-      ? `<button class="btn btn-warning btn-sm mgr-act-archive-now" data-id="${rem.id}">📦 Archive Now</button>`
-      : `<button class="btn btn-ghost btn-sm mgr-act-toggle" data-id="${rem.id}">
-           ${rem.enabled !== false ? '⏸️ Pause' : '▶️ Activate'}
+      ? `<button class="btn-icon-action mgr-act-archive-now" data-id="${rem.id}" style="color: #f59e0b; border-color: rgba(245, 158, 11, 0.3);" title="Archive Now">📦</button>`
+      : `<button class="btn-icon-action mgr-act-toggle" data-id="${rem.id}" title="${!isPaused ? 'Pause Reminder' : 'Activate Reminder'}">
+           ${!isPaused ? '⏸️' : '▶️'}
          </button>`;
 
+    const countdownHtml = isPaused
+      ? ''
+      : isPassedOneTime
+        ? `<div style="font-size: 0.775rem; color: #f59e0b; margin-top: 2px;">(Passed)</div>`
+        : `<div style="font-size: 0.775rem; color: #38bdf8; margin-top: 2px;" class="live-countdown" data-timestamp="${rem.time}">${formatRelativeTime(rem.time)}</div>`;
+
+    const prioClass = `prio-row-${(rem.priority || 'medium').toLowerCase()}`;
+
     return `
-      <tr>
-        <td style="font-weight: 600;">${cat.icon} ${escapeHTML(cleanTitle)}</td>
-        <td>${cat.label}</td>
-        <td><span class="badge ${prio.badgeClass}">${prio.label}</span></td>
-        <td>
+      <tr class="${prioClass}">
+        <td style="text-align: center; font-weight: 700; color: var(--text-muted); font-size: 0.8rem;">${index + 1}</td>
+        <td class="col-title" style="font-weight: 600;" title="${escapeHTML(cleanTitle)}">${cat.icon} ${escapeHTML(cleanTitle)}</td>
+        <td class="col-center">${cat.label}</td>
+        <td class="col-center"><span class="badge ${prio.badgeClass}">${prio.label}</span></td>
+        <td class="col-center">
           <div style="font-weight: 600;">${getScheduleLabel(rem)}</div>
-          <div style="font-size: 0.775rem; color: ${isPassedOneTime ? '#f59e0b' : '#38bdf8'};" class="live-countdown" data-timestamp="${rem.time}">${formatRelativeTime(rem.time)}</div>
+          ${countdownHtml}
         </td>
-        <td>
-          <span style="color: ${isPassedOneTime ? '#f59e0b' : rem.enabled !== false ? '#10b981' : '#64748b'}; font-weight: 600;">
-            ${isPassedOneTime ? 'Passed' : rem.enabled !== false ? 'Active' : 'Paused'}
+        <td class="col-center">
+          <span style="color: ${isPassedOneTime ? '#f59e0b' : !isPaused ? '#10b981' : '#64748b'}; font-weight: 600;">
+            ${isPassedOneTime ? 'Passed' : !isPaused ? 'Active' : 'Paused'}
           </span>
         </td>
-        <td>
-          ${toggleBtnHtml}
-          ${editBtnHtml}
-          ${deleteBtnHtml}
+        <td class="col-center">
+          <div class="action-btn-group">
+            ${toggleBtnHtml}
+            ${editBtnHtml}
+            ${deleteBtnHtml}
+          </div>
         </td>
       </tr>
     `;
@@ -809,12 +1484,28 @@ function renderRemindersTable() {
 
   safeSetHTML(tbody, html);
 
+  initTableScrollIndicators();
+
   tbody.querySelectorAll('.mgr-act-toggle').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       const id = e.currentTarget.dataset.id;
       const idx = activeRemindersList.findIndex(r => r.id === id);
       if (idx !== -1) {
-        activeRemindersList[idx].enabled = !activeRemindersList[idx].enabled;
+        const targetRem = activeRemindersList[idx];
+        targetRem.enabled = !targetRem.enabled;
+
+        // Bi-directional sync with Health Hub settings for auto health reminders
+        const health = userSettings.healthSettings || {};
+        if (targetRem.id === 'auto_health_water' || targetRem.category === 'water') {
+          health.waterEnabled = targetRem.enabled;
+        } else if (targetRem.id === 'auto_health_eye' || targetRem.category === 'eye') {
+          health.eyeRestEnabled = targetRem.enabled;
+        } else if (targetRem.id === 'auto_health_posture' || targetRem.category === 'posture') {
+          health.postureEnabled = targetRem.enabled;
+        }
+        userSettings.healthSettings = health;
+        await storage.saveSettings(userSettings);
+
         await storage.saveReminders(activeRemindersList);
         if (typeof chrome !== 'undefined' && chrome.runtime) {
           chrome.runtime.sendMessage({ action: 'REFRESH_ALARMS' });
@@ -825,12 +1516,25 @@ function renderRemindersTable() {
     });
   });
 
+  const attachMedData = (rem) => {
+    if (!rem) return rem;
+    if (rem.id.startsWith('med_rem_') || rem.category === 'medicine') {
+      const rawId = rem.id.replace('med_rem_', '');
+      const healthMeds = userSettings.healthSettings?.medications || [];
+      const matched = healthMeds.find(m => m.id === rawId || m.id === 'med_' + rawId || rem.title.includes(m.name));
+      if (matched) {
+        return { ...rem, medData: { ...matched } };
+      }
+    }
+    return rem;
+  };
+
   tbody.querySelectorAll('.mgr-act-archive-now').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       const id = e.currentTarget.dataset.id;
       const rem = activeRemindersList.find(r => r.id === id);
       if (rem) {
-        await storage.archiveReminder(rem);
+        await storage.archiveReminder(attachMedData(rem));
         activeRemindersList = activeRemindersList.filter(r => r.id !== id);
         await storage.saveReminders(activeRemindersList);
         if (typeof chrome !== 'undefined' && chrome.runtime) {
@@ -856,13 +1560,19 @@ function renderRemindersTable() {
   tbody.querySelectorAll('.mgr-act-del').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       const id = e.currentTarget.dataset.id;
-      activeRemindersList = activeRemindersList.filter(r => r.id !== id);
-      await storage.saveReminders(activeRemindersList);
-      if (typeof chrome !== 'undefined' && chrome.runtime) {
-        chrome.runtime.sendMessage({ action: 'REFRESH_ALARMS' });
+      const remToArchive = activeRemindersList.find(r => r.id === id);
+      if (remToArchive) {
+        await storage.archiveReminder(attachMedData(remToArchive));
+        activeRemindersList = activeRemindersList.filter(r => r.id !== id);
+        await storage.saveReminders(activeRemindersList);
+        if (typeof chrome !== 'undefined' && chrome.runtime) {
+          chrome.runtime.sendMessage({ action: 'REFRESH_ALARMS' });
+        }
+        await renderArchiveTable();
+        renderRemindersTable();
+        renderOverview();
+        showToast('Reminder moved to Completed Reminders (Archive) 📦', 'success');
       }
-      renderRemindersTable();
-      renderOverview();
     });
   });
 }
@@ -879,10 +1589,10 @@ function openAddModal() {
 
   const catSelect = document.getElementById('edit-rem-category');
   if (catSelect) {
-    catSelect.value = 'new_custom';
+    catSelect.value = '';
   }
   const customBox = document.getElementById('box-custom-category-fields');
-  if (customBox) customBox.style.display = 'block';
+  if (customBox) customBox.style.display = 'none';
 
   if (document.getElementById('edit-rem-date')) {
     document.getElementById('edit-rem-date').value = '';
@@ -898,7 +1608,7 @@ function openAddModal() {
   }
 
   updateDynamicModalFields('once');
-  document.getElementById('modal-reminder-title').textContent = 'Add Smart Reminder';
+  document.getElementById('modal-reminder-title').textContent = 'Add Reminder';
   document.getElementById('edit-reminder-modal').classList.add('active');
   startLivePreviewCountdown();
 }
@@ -1075,11 +1785,17 @@ async function saveModalReminder() {
   }
 
   const desc = document.getElementById('edit-rem-desc').value.trim();
-  let category = document.getElementById('edit-rem-category').value;
+  const catInput = document.getElementById('edit-rem-category');
+  let category = catInput ? catInput.value : '';
+  if (!category || category === '') {
+    highlightFieldError(catInput, 'Please select a category!');
+    return;
+  }
+
   const customName = document.getElementById('edit-rem-custom-name')?.value.trim();
   const customEmoji = document.getElementById('edit-rem-custom-emoji')?.value.trim() || '';
 
-  if (category === 'new_custom' || category === 'custom' || customName || customEmoji) {
+  if (category === 'new_custom' || customName || customEmoji) {
     const finalLabel = customName || 'General';
     const finalEmoji = customEmoji ? (Array.from(customEmoji)[0] || '🔔') : '🔔';
     const savedCat = await storage.saveCustomCategory({ label: finalLabel, icon: finalEmoji });
@@ -1094,26 +1810,30 @@ async function saveModalReminder() {
   const statusElem = document.getElementById('edit-rem-status');
   const enabled = statusElem ? (statusElem.value === 'true') : true;
 
-  if (id) {
-    // Update existing
-    const idx = activeRemindersList.findIndex(r => r.id === id);
-    if (idx !== -1) {
-      activeRemindersList[idx] = {
-        ...activeRemindersList[idx],
-        title,
-        description: desc,
-        category,
-        priority,
-        repeat,
-        repeatInterval,
-        enabled,
-        time: scheduledTimestamp
-      };
-    }
+  if (restoringArchivedId) {
+    const archivedRem = archivedRemindersList.find(r => r.id === restoringArchivedId);
+    await storage.deleteArchivedReminder(restoringArchivedId);
+    restoringArchivedId = null;
+    await syncRestoredMedicationToHealthHub(archivedRem);
+    await renderArchiveTable();
+  }
+
+  const existingIdx = activeRemindersList.findIndex(r => r.id === id);
+  if (existingIdx !== -1) {
+    activeRemindersList[existingIdx] = {
+      ...activeRemindersList[existingIdx],
+      title,
+      description: desc,
+      category,
+      priority,
+      repeat,
+      repeatInterval,
+      enabled,
+      time: scheduledTimestamp
+    };
   } else {
-    // Create new
     const newRem = {
-      id: generateId(),
+      id: id || generateId(),
       title,
       description: desc,
       category,
@@ -1328,7 +2048,7 @@ async function exportHTMLReport() {
     <tr>
       <td><strong>💊 ${escapeHTML(m.name)}</strong></td>
       <td>${m.takenTodayCount || 0} / ${m.doseCount || 1} doses</td>
-      <td>${(m.times || []).join(', ') || 'N/A'}</td>
+      <td>${(m.times || []).map(t => formatTimeStringToUserDevice(t)).join(', ') || 'N/A'}</td>
       <td>${m.instructions ? escapeHTML(m.instructions) : 'None'}</td>
     </tr>
   `).join('');
@@ -1379,7 +2099,7 @@ async function exportHTMLReport() {
       if (p.gender !== 'female' || !pt.lastPeriodDate) return '';
       const cycleLength = pt.cycleLength || 28;
       const today = new Date(); today.setHours(0,0,0,0);
-      const last = new Date(pt.lastPeriodDate); last.setHours(0,0,0,0);
+      const last = parseLocalDate(pt.lastPeriodDate);
       const daysSince = Math.floor((today - last) / 86400000);
       const cycleDay = (daysSince % cycleLength) + 1;
       const cyclesSince = Math.floor(daysSince / cycleLength);
@@ -1578,79 +2298,164 @@ function updateMascotPreview() {
 }
 
 /* --- TAB 5: CONTEXT & BLOCKER --- */
-let contextEditMode = false;
-
 function renderContextState() {
-  const blockerEl = document.getElementById('setting-blocker-enabled');
-  const contextEl = document.getElementById('setting-context-enabled');
+  const isContextOn = userSettings.contextAwarenessEnabled !== false;
+  const toggleContext = document.getElementById('toggle-context-enabled');
+  const labelContext = document.getElementById('label-context-status');
+  const optionsBox = document.getElementById('box-context-options');
 
-  if (blockerEl) {
-    blockerEl.disabled = !contextEditMode;
-    if (!contextEditMode) blockerEl.value = String(userSettings.websiteBlockerEnabled !== false);
+  if (toggleContext) toggleContext.checked = isContextOn;
+  if (labelContext) {
+    labelContext.textContent = isContextOn ? 'Enabled' : 'Disabled';
+    labelContext.style.color = isContextOn ? '#10b981' : '#64748b';
   }
-  if (contextEl) {
-    contextEl.disabled = !contextEditMode;
-    if (!contextEditMode) contextEl.value = String(userSettings.contextAwarenessEnabled !== false);
+  if (optionsBox) {
+    optionsBox.style.display = isContextOn ? 'block' : 'none';
   }
 
-  const grp = document.getElementById('grp-btn-context');
-  if (grp) {
-    if (contextEditMode) {
-      grp.innerHTML = `
-        <div style="display: flex; gap: 8px;">
-          <button class="btn btn-primary btn-sm" id="btn-save-context">💾 Save</button>
-          <button class="btn btn-ghost btn-sm" id="btn-cancel-context">✕ Cancel</button>
-        </div>
-      `;
-    } else {
-      grp.innerHTML = `<button class="btn btn-secondary btn-sm" id="btn-edit-context">✏️ Edit</button>`;
+  const blockMode = userSettings.contextBlockMode || 'remi_overlay';
+  const radioOverlay = document.getElementById('radio-mode-overlay');
+  const radioAll = document.getElementById('radio-mode-all');
+  if (radioOverlay && radioAll) {
+    if (blockMode === 'all_notifications') radioAll.checked = true;
+    else radioOverlay.checked = true;
+  }
+
+  const isBlockerOn = userSettings.websiteBlockerEnabled !== false;
+  const toggleBlocker = document.getElementById('toggle-blocker-enabled');
+  const labelBlocker = document.getElementById('label-blocker-status');
+
+  if (toggleBlocker) toggleBlocker.checked = isBlockerOn;
+  if (labelBlocker) {
+    labelBlocker.textContent = isBlockerOn ? 'Enabled' : 'Disabled';
+    labelBlocker.style.color = isBlockerOn ? '#10b981' : '#64748b';
+  }
+}
+
+function parseDomainsInput(rawInput) {
+  if (!rawInput) return [];
+  const items = rawInput.split(/[\s,]+/);
+  const cleanList = [];
+  for (let item of items) {
+    let domain = item.trim().toLowerCase();
+    if (!domain) continue;
+    domain = domain.replace(/^https?:\/\//i, '');
+    domain = domain.replace(/^www\./i, '');
+    domain = domain.split('/')[0];
+    if (domain && !cleanList.includes(domain)) {
+      cleanList.push(domain);
     }
   }
-
-  document.getElementById('btn-edit-context')?.addEventListener('click', () => {
-    contextEditMode = true;
-    renderContextState();
-  });
-
-  document.getElementById('btn-save-context')?.addEventListener('click', async () => {
-    userSettings.websiteBlockerEnabled = document.getElementById('setting-blocker-enabled').value === 'true';
-    userSettings.contextAwarenessEnabled = document.getElementById('setting-context-enabled').value === 'true';
-    await storage.saveSettings(userSettings);
-    showToast('Blocker & Context settings saved successfully!', 'success');
-    contextEditMode = false;
-    renderContextState();
-  });
-
-  document.getElementById('btn-cancel-context')?.addEventListener('click', () => {
-    contextEditMode = false;
-    renderContextState();
-  });
+  return cleanList;
 }
 
 function initContextBlocker() {
   renderContextState();
 
-  document.getElementById('btn-add-priority-site').addEventListener('click', () => {
+  document.getElementById('toggle-context-enabled')?.addEventListener('change', async (e) => {
+    const isChecked = e.target.checked;
+    userSettings.contextAwarenessEnabled = isChecked;
+    await storage.saveSettings(userSettings);
+    showToast(`Smart Context Queueing ${isChecked ? 'Enabled ⚡' : 'Disabled'}`, isChecked ? 'success' : 'info');
+    renderContextState();
+  });
+
+  const handleRadioChange = async (e) => {
+    userSettings.contextBlockMode = e.target.value;
+    await storage.saveSettings(userSettings);
+    showToast(`Notification Blocking Mode set to ${e.target.value === 'remi_overlay' ? 'Remi Overlay Only 👦' : 'All Notifications & Sounds 🔕'}`, 'success');
+  };
+
+  document.getElementById('radio-mode-overlay')?.addEventListener('change', handleRadioChange);
+  document.getElementById('radio-mode-all')?.addEventListener('change', handleRadioChange);
+
+  document.getElementById('toggle-blocker-enabled')?.addEventListener('change', async (e) => {
+    const isChecked = e.target.checked;
+    userSettings.websiteBlockerEnabled = isChecked;
+    await storage.saveSettings(userSettings);
+    showToast(`Website Blocker ${isChecked ? 'Enabled 🛡️' : 'Disabled'}`, isChecked ? 'success' : 'info');
+    renderContextState();
+  });
+
+  const prioInput = document.getElementById('new-priority-site-input');
+  const prioBtn = document.getElementById('btn-add-priority-site');
+  if (prioInput && prioBtn) {
+    prioInput.addEventListener('input', () => {
+      prioBtn.style.display = prioInput.value.trim() ? 'inline-flex' : 'none';
+    });
+  }
+
+  const addPriorityDomains = async () => {
     const input = document.getElementById('new-priority-site-input');
-    const domain = input.value.trim().toLowerCase();
-    if (domain && !(userSettings.priorityWebsites || []).includes(domain)) {
-      if (!userSettings.priorityWebsites) userSettings.priorityWebsites = [];
-      userSettings.priorityWebsites.push(domain);
-      storage.saveSettings(userSettings);
-      input.value = '';
+    const rawVal = input ? input.value : '';
+    const newDomains = parseDomainsInput(rawVal);
+    if (newDomains.length === 0) return;
+
+    if (!userSettings.priorityWebsites) userSettings.priorityWebsites = [];
+    let addedCount = 0;
+    for (const d of newDomains) {
+      if (!userSettings.priorityWebsites.includes(d)) {
+        userSettings.priorityWebsites.push(d);
+        addedCount++;
+      }
+    }
+    if (addedCount > 0) {
+      await storage.saveSettings(userSettings);
+      showToast(`Added ${addedCount} priority domain${addedCount > 1 ? 's' : ''}! 🌐`, 'success');
+      if (input) input.value = '';
+      if (prioBtn) prioBtn.style.display = 'none';
       renderDomainLists();
+    } else {
+      showToast('Domain(s) already in list!', 'info');
+    }
+  };
+
+  document.getElementById('btn-add-priority-site')?.addEventListener('click', addPriorityDomains);
+  document.getElementById('new-priority-site-input')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      addPriorityDomains();
     }
   });
 
-  document.getElementById('btn-add-blocked-site').addEventListener('click', () => {
+  const blockInput = document.getElementById('new-blocked-site-input');
+  const blockBtn = document.getElementById('btn-add-blocked-site');
+  if (blockInput && blockBtn) {
+    blockInput.addEventListener('input', () => {
+      blockBtn.style.display = blockInput.value.trim() ? 'inline-flex' : 'none';
+    });
+  }
+
+  const addBlockedDomains = async () => {
     const input = document.getElementById('new-blocked-site-input');
-    const domain = input.value.trim().toLowerCase();
-    if (domain && !(userSettings.blockedWebsites || []).includes(domain)) {
-      if (!userSettings.blockedWebsites) userSettings.blockedWebsites = [];
-      userSettings.blockedWebsites.push(domain);
-      storage.saveSettings(userSettings);
-      input.value = '';
+    const rawVal = input ? input.value : '';
+    const newDomains = parseDomainsInput(rawVal);
+    if (newDomains.length === 0) return;
+
+    if (!userSettings.blockedWebsites) userSettings.blockedWebsites = [];
+    let addedCount = 0;
+    for (const d of newDomains) {
+      if (!userSettings.blockedWebsites.includes(d)) {
+        userSettings.blockedWebsites.push(d);
+        addedCount++;
+      }
+    }
+    if (addedCount > 0) {
+      await storage.saveSettings(userSettings);
+      showToast(`Added ${addedCount} blocked domain${addedCount > 1 ? 's' : ''}! 🌐`, 'success');
+      if (input) input.value = '';
+      if (blockBtn) blockBtn.style.display = 'none';
       renderDomainLists();
+    } else {
+      showToast('Domain(s) already in list!', 'info');
+    }
+  };
+
+  document.getElementById('btn-add-blocked-site')?.addEventListener('click', addBlockedDomains);
+  document.getElementById('new-blocked-site-input')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      addBlockedDomains();
     }
   });
 
@@ -1664,7 +2469,7 @@ function renderDomainLists() {
   if (priorityContainer) {
     const html = (userSettings.priorityWebsites || []).map(d => `
       <span class="domain-pill">
-        ⚡ ${escapeHTML(d)}
+        🌐 ${escapeHTML(d)}
         <span class="domain-pill-remove" data-type="priority" data-domain="${d}">×</span>
       </span>
     `).join('');
@@ -1673,8 +2478,8 @@ function renderDomainLists() {
 
   if (blockedContainer) {
     const html = (userSettings.blockedWebsites || []).map(d => `
-      <span class="domain-pill" style="background: rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 0.4); color: #f87171;">
-        🛡️ ${escapeHTML(d)}
+      <span class="domain-pill domain-pill-blocked">
+        🌐 ${escapeHTML(d)}
         <span class="domain-pill-remove" data-type="blocked" data-domain="${d}">×</span>
       </span>
     `).join('');
@@ -1696,6 +2501,40 @@ function renderDomainLists() {
   });
 }
 
+function updateVolumeSliderVisuals() {
+  const slider = document.getElementById('setting-volume-slider');
+  const badge = document.getElementById('setting-volume-badge');
+  if (!slider) return;
+
+  const val = parseInt(slider.value, 10);
+  if (badge) {
+    if (val === 0) {
+      badge.textContent = 'Muted 🔇 (0%)';
+      badge.style.color = '#94a3b8';
+    } else if (val === 100) {
+      badge.textContent = '100% 🔊';
+      badge.style.color = '#10b981';
+    } else if (val < 50) {
+      badge.textContent = `${val}% 🔈`;
+      badge.style.color = '#3b82f6';
+    } else {
+      badge.textContent = `${val}% 🔉`;
+      badge.style.color = '#3b82f6';
+    }
+  }
+
+  if (val === 0) {
+    slider.style.background = 'rgba(255, 255, 255, 0.1)';
+    slider.classList.add('is-muted');
+  } else if (val === 100) {
+    slider.style.background = 'linear-gradient(90deg, #3b82f6 0%, #10b981 100%)';
+    slider.classList.remove('is-muted');
+  } else {
+    slider.style.background = `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${val}%, rgba(255, 255, 255, 0.1) ${val}%, rgba(255, 255, 255, 0.1) 100%)`;
+    slider.classList.remove('is-muted');
+  }
+}
+
 /* --- TAB 6: SETTINGS & BACKUP --- */
 let prefsEditMode = false;
 
@@ -1710,7 +2549,10 @@ function renderPrefsState() {
     document.getElementById('setting-sound-tone').value = userSettings.soundTone || 'chime';
   }
   if (document.getElementById('setting-volume-slider')) {
-    document.getElementById('setting-volume-slider').value = userSettings.volume || 80;
+    const slider = document.getElementById('setting-volume-slider');
+    slider.value = userSettings.volume !== undefined ? userSettings.volume : 100;
+    updateVolumeSliderVisuals();
+    slider.addEventListener('input', updateVolumeSliderVisuals);
   }
   if (document.getElementById('setting-auto-archive')) {
     document.getElementById('setting-auto-archive').value = String(userSettings.autoArchivePassed !== false);
@@ -1806,6 +2648,21 @@ function initSettingsAndBackup() {
   };
   populateProfileFields(profile, periodConfig);
 
+  // Expand / collapse period config body (hidden by default in View mode)
+  const configBody = document.getElementById('period-config-body');
+  const configArrow = document.getElementById('period-config-arrow');
+  const toggleBtn = document.getElementById('btn-toggle-period-config');
+
+  const setPeriodConfigExpanded = (expanded) => {
+    if (configBody) configBody.style.display = expanded ? 'block' : 'none';
+    if (configArrow) configArrow.textContent = expanded ? '▲' : '▼';
+  };
+
+  toggleBtn?.addEventListener('click', () => {
+    const isExpanded = configBody?.style.display === 'block';
+    setPeriodConfigExpanded(!isExpanded);
+  });
+
   // Lock / Unlock helpers
   const setEditMode = (enabled) => {
     allProfileFields().forEach(el => {
@@ -1816,9 +2673,13 @@ function initSettingsAndBackup() {
     if (actionBtns) actionBtns.style.display = enabled ? 'flex' : 'none';
   };
   setEditMode(false); // start locked
+  setPeriodConfigExpanded(false); // hidden by default in View mode
 
   // ✏️ Edit Profile click
-  editBtn?.addEventListener('click', () => setEditMode(true));
+  editBtn?.addEventListener('click', () => {
+    setEditMode(true);
+    setPeriodConfigExpanded(true); // automatically expand fields when editing
+  });
 
   // ✕ Cancel
   cancelBtn?.addEventListener('click', () => {
@@ -1827,6 +2688,7 @@ function initSettingsAndBackup() {
     togglePeriodSettings(userSettings.userProfile?.gender || 'prefer_not_to_say');
     applyTrackingToggle(!!(userSettings.periodTracker?.trackingEnabled));
     setEditMode(false);
+    setPeriodConfigExpanded(false); // collapse back in View mode
   });
 
   // Show/hide period config fields based on checkbox
@@ -1866,6 +2728,41 @@ function initSettingsAndBackup() {
     const newRemindTime = remindTimeEl?.value || '09:00';
     const newLastDate = lastDateEl?.value || '';
     const newCycleLength = parseInt(cycleLenEl?.value, 10) || 28;
+    const newPeriodDuration = parseInt(periodDurEl?.value, 10) || 5;
+
+    // --- Validation before saving if Period Tracking is Enabled ---
+    if (newGender === 'female' && newTrackingEnabled) {
+      if (lastDateEl) lastDateEl.style.borderColor = '';
+      if (cycleLenEl) cycleLenEl.style.borderColor = '';
+      if (periodDurEl) periodDurEl.style.borderColor = '';
+
+      if (!newLastDate) {
+        showToast('⚠️ Please select your Last Period Start Date to enable cycle tracking.', 'warning', 5000);
+        if (lastDateEl) {
+          lastDateEl.style.borderColor = '#ef4444';
+          lastDateEl.focus();
+        }
+        return;
+      }
+
+      if (!cycleLenEl?.value || isNaN(newCycleLength) || newCycleLength < 15 || newCycleLength > 45) {
+        showToast('⚠️ Please enter a valid Average Cycle Length (between 15 and 45 days).', 'warning', 5000);
+        if (cycleLenEl) {
+          cycleLenEl.style.borderColor = '#ef4444';
+          cycleLenEl.focus();
+        }
+        return;
+      }
+
+      if (!periodDurEl?.value || isNaN(newPeriodDuration) || newPeriodDuration < 1 || newPeriodDuration > 15) {
+        showToast('⚠️ Please enter a valid Average Period Duration (between 1 and 15 days).', 'warning', 5000);
+        if (periodDurEl) {
+          periodDurEl.style.borderColor = '#ef4444';
+          periodDurEl.focus();
+        }
+        return;
+      }
+    }
 
     // --- Date validation (only when tracking enabled) ---
     if (newGender === 'female' && newTrackingEnabled && newLastDate) {
@@ -1877,7 +2774,10 @@ function initSettingsAndBackup() {
 
       if (entered > today) {
         showToast('⚠️ Last period date cannot be in the future. Please enter the actual start date of your most recent period.', 'error', 6000);
-        lastDateEl?.focus();
+        if (lastDateEl) {
+          lastDateEl.style.borderColor = '#ef4444';
+          lastDateEl.focus();
+        }
         return;
       }
       if (entered < earliestAllowed) {
@@ -1889,12 +2789,14 @@ function initSettingsAndBackup() {
           `➡️ Click OK to save and continue, or Cancel to re-enter a more recent date.`
         );
         if (!proceed) {
-          lastDateEl?.focus();
+          if (lastDateEl) {
+            lastDateEl.style.borderColor = '#ef4444';
+            lastDateEl.focus();
+          }
           return;
         }
       }
     }
-    const newPeriodDuration = parseInt(periodDurEl?.value, 10) || 5;
 
     userSettings.userProfile = {
       name: nameEl?.value.trim() || '',
@@ -1911,62 +2813,14 @@ function initSettingsAndBackup() {
     };
     await storage.saveSettings(userSettings);
 
-    // Schedule or clear pre-period reminder
-    if (newGender === 'female' && newTrackingEnabled && newLastDate && newRemindDays > 0) {
-      const today = new Date(); today.setHours(0,0,0,0);
-      const last = new Date(newLastDate); last.setHours(0,0,0,0);
-      const daysSince = Math.floor((today - last) / 86400000);
-      const cyclesSince = Math.floor(daysSince / newCycleLength);
-      const nextPeriod = new Date(last.getTime() + (cyclesSince + 1) * newCycleLength * 86400000);
-      const reminderDate = new Date(nextPeriod);
-      reminderDate.setDate(reminderDate.getDate() - newRemindDays);
-      const [rHour, rMin] = newRemindTime.split(':').map(Number);
-      reminderDate.setHours(rHour, rMin, 0, 0);
-
-      if (reminderDate > new Date()) {
-        const existingReminders = await storage.getReminders();
-        const cleaned = existingReminders.filter(r => r.id !== 'auto_period_reminder');
-        const periodReminder = {
-          id: 'auto_period_reminder',
-          title: newRemindDays === 1
-            ? '🌸 Period Tomorrow — Be Prepared!'
-            : newRemindDays <= 3
-            ? `🌸 Period in ${newRemindDays} Days — Heads Up!`
-            : `🌸 Period in About ${newRemindDays} Days — Plan Ahead!`,
-          description: newRemindDays === 1
-            ? 'Your period is expected tomorrow 🩸 Make sure you have pads/tampons/cup ready. Take care of yourself 💕'
-            : newRemindDays <= 3
-            ? `Your period is expected in ${newRemindDays} days. Stock up on supplies, stay hydrated, and be kind to yourself 💊💕 (Reminder set ${newRemindDays} days before your period)`
-            : `Your next period is about ${newRemindDays} days away. A good time to stock up on period supplies and plan some self-care 🛁💕 (Reminder set ${newRemindDays} days before your period)`,
-          category: 'health',
-          priority: newRemindDays <= 2 ? 'high' : 'medium',
-          repeat: 'once',
-          time: reminderDate.getTime(),
-          enabled: true,
-          isPeriodReminder: true,
-          remindDaysBefore: newRemindDays,
-          createdAt: Date.now(),
-          completedCount: 0
-        };
-        cleaned.push(periodReminder);
-        await storage.saveReminders(cleaned);
-        if (typeof chrome !== 'undefined' && chrome.runtime) {
-          chrome.runtime.sendMessage({ action: 'REFRESH_ALARMS' });
-        }
-      }
-    } else {
-      const existingReminders = await storage.getReminders();
-      const cleaned = existingReminders.filter(r => r.id !== 'auto_period_reminder');
-      if (cleaned.length !== existingReminders.length) {
-        await storage.saveReminders(cleaned);
-        if (typeof chrome !== 'undefined' && chrome.runtime) {
-          chrome.runtime.sendMessage({ action: 'REFRESH_ALARMS' });
-        }
-      }
+    // Sync pre-period reminder state according to rules (only visible during pre-period window)
+    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+      chrome.runtime.sendMessage({ action: 'SYNC_PERIOD_REMINDER' });
     }
 
     renderPeriodTracker();
     setEditMode(false); // lock fields after save
+    setPeriodConfigExpanded(false); // collapse back in View mode
     showToast('Profile saved successfully!', 'success');
   });
 
@@ -1979,9 +2833,71 @@ function initSettingsAndBackup() {
     document.getElementById('tab-settings')?.classList.add('active');
   });
 
-  document.getElementById('btn-test-sound')?.addEventListener('click', () => {
-    const tone = document.getElementById('setting-sound-tone')?.value || 'chime';
-    const vol = parseInt(document.getElementById('setting-volume-slider')?.value || '80', 10);
+  const handleUndoPeriodStart = async () => {
+    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+      chrome.runtime.sendMessage({ action: 'REVERT_PERIOD_START' }, async (response) => {
+        if (response && response.success) {
+          showToast(`↩️ Period date reverted! Cycle phase restored 💕`, 'info', 5000);
+          userSettings = await storage.getSettings();
+          const periodConfig = userSettings.periodTracker || {};
+          if (document.getElementById('period-last-date')) {
+            document.getElementById('period-last-date').value = periodConfig.lastPeriodDate || '';
+          }
+          renderPeriodTracker();
+          renderRemindersTable();
+          renderTodayTasksTable();
+        }
+      });
+    }
+  };
+
+  // 🩸 Early Period Start Logger Handler
+  document.getElementById('btn-log-period-early')?.addEventListener('click', async () => {
+    const daysBackOffset = parseInt(document.getElementById('period-log-early-select')?.value || '0', 10);
+    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+      chrome.runtime.sendMessage({ action: 'LOG_PERIOD_START', daysBackOffset }, async (response) => {
+        const offsetLabels = ['Today', '1 Day Early', '2 Days Early', '3 Days Early'];
+        const label = offsetLabels[daysBackOffset] || 'Today';
+        showToast(`🩸 Period start logged (${label})! Predictions & cycle phase updated 💕`, 'success', 5000);
+
+        userSettings = await storage.getSettings();
+        const periodConfig = userSettings.periodTracker || {};
+        if (document.getElementById('period-last-date')) {
+          document.getElementById('period-last-date').value = periodConfig.lastPeriodDate || '';
+        }
+        renderPeriodTracker();
+        renderRemindersTable();
+        renderTodayTasksTable();
+      });
+    }
+  });
+
+  // ↩️ Revert / Undo Period Logger Handler (Top Header Button)
+  document.getElementById('period-card-undo-btn')?.addEventListener('click', handleUndoPeriodStart);
+
+  if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
+    chrome.runtime.onMessage.addListener(async (msg) => {
+      if (msg.action === 'PERIOD_LOGGED') {
+        userSettings = await storage.getSettings();
+        const periodConfig = userSettings.periodTracker || {};
+        if (document.getElementById('period-last-date')) {
+          document.getElementById('period-last-date').value = periodConfig.lastPeriodDate || '';
+        }
+        renderPeriodTracker();
+        renderRemindersTable();
+        renderTodayTasksTable();
+      }
+    });
+  }
+
+  document.getElementById('btn-test-sound')?.addEventListener('click', async () => {
+    const toneSelect = document.getElementById('setting-sound-tone');
+    const volSlider = document.getElementById('setting-volume-slider');
+    const settings = await storage.getSettings();
+    const tone = toneSelect?.value || settings.soundTone || 'chime';
+    const vol = volSlider?.value !== undefined && volSlider?.value !== '' 
+      ? parseInt(volSlider.value, 10) 
+      : (settings.volume !== undefined ? settings.volume : 100);
     soundEngine.playChime(tone, vol);
   });
 
@@ -2020,16 +2936,76 @@ function initSettingsAndBackup() {
     reader.onload = async (event) => {
       try {
         const imported = JSON.parse(event.target.result);
-        if (imported.reminders) await storage.saveReminders(imported.reminders);
-        if (imported.settings) await storage.saveSettings(imported.settings);
-        if (imported.archivedReminders) await storage.saveArchivedReminders(imported.archivedReminders);
-        if (imported.customCategories) await storage.saveCustomCategories(imported.customCategories);
+        const now = Date.now();
+        const activeReminders = [];
+        let archivedList = Array.isArray(imported.archivedReminders) ? imported.archivedReminders : [];
+
+        if (Array.isArray(imported.reminders)) {
+          for (const rem of imported.reminders) {
+            if (!rem) continue;
+
+            // Normalize time string e.g. "09:00" or ISO string to numeric timestamp
+            let remTime = rem.time;
+            if (typeof remTime === 'string') {
+              if (remTime.includes(':')) {
+                const [h, m] = remTime.split(':').map(Number);
+                const d = new Date();
+                d.setHours(h || 0, m || 0, 0, 0);
+                remTime = d.getTime();
+              } else {
+                const parsed = new Date(remTime).getTime();
+                if (!isNaN(parsed)) remTime = parsed;
+              }
+            }
+
+            rem.time = remTime || now;
+
+            // Check if scheduled time is in the past relative to restore upload time
+            if (rem.time <= now) {
+              if (rem.repeat && rem.repeat !== 'once') {
+                // Repeating / interval reminder: Recalculate next future execution time AFTER restore upload time!
+                const nextFuture = calculateNextFutureTime(rem, now);
+                rem.time = nextFuture || (now + 60 * 1000);
+                rem.enabled = true;
+                activeReminders.push(rem);
+              } else {
+                // Passed one-time reminder: Move to Archive!
+                rem.enabled = false;
+                rem.archivedAt = rem.archivedAt || new Date().toISOString();
+                archivedList.push(rem);
+              }
+            } else {
+              activeReminders.push(rem);
+            }
+          }
+        }
+
+        await storage.saveReminders(activeReminders);
+        await storage.saveArchivedReminders(archivedList);
+        if (imported.settings) {
+          const s = imported.settings;
+          if (s.contextBlocker) {
+            s.priorityWebsites = s.priorityWebsites || s.contextBlocker.prioritySites || [];
+            s.blockedWebsites = s.blockedWebsites || s.contextBlocker.blocklist || [];
+          }
+          await storage.saveSettings(s);
+        }
+        if (imported.customCategories) {
+          if (typeof storage.saveCustomCategories === 'function') {
+            await storage.saveCustomCategories(imported.customCategories);
+          } else {
+            await storage.set(STORAGE_KEYS.CUSTOM_CATEGORIES, imported.customCategories);
+          }
+        }
         if (imported.dailyStats) await storage.set(STORAGE_KEYS.DAILY_STATS, imported.dailyStats);
         if (imported.dailyProgress) await storage.set(STORAGE_KEYS.REMINDER_DAILY_PROGRESS, imported.dailyProgress);
         if (imported.focusState) await storage.saveFocusState(imported.focusState);
         showToast('Backup restored successfully! Reloading...', 'success');
-        window.location.reload();
+        setTimeout(() => {
+          window.location.reload();
+        }, 500);
       } catch (err) {
+        console.error("Backup Restore Failed:", err);
         showToast('Invalid backup file format.', 'error');
       }
     };
@@ -2065,6 +3041,166 @@ function initArchiveManager() {
   });
 }
 
+let restoringArchivedId = null;
+
+async function syncRestoredMedicationToHealthHub(rem) {
+  if (!rem) return;
+  const isMed = rem.id.startsWith('med_rem_') || rem.category === 'medicine' || rem.title.includes('Medication:');
+  if (!isMed) return;
+
+  const rawMedId = rem.id.replace('med_rem_', '');
+  userSettings = await storage.getSettings();
+  const health = userSettings.healthSettings || {};
+  health.medications = health.medications || [];
+
+  let restoredMed = null;
+
+  if (rem.medData) {
+    restoredMed = {
+      ...rem.medData,
+      id: rawMedId || rem.medData.id || generateId(),
+      takenTodayCount: 0
+    };
+  } else {
+    const match = rem.title.match(/Medication:\s*(.*?)(?:\s*\((.*?)\))?$/i);
+    const medName = match ? match[1].trim() : rem.title.replace(/^[💊\s]+/, '').replace(/Medication:\s*/i, '').trim();
+    const medDosage = match && match[2] ? match[2].trim() : (rem.description ? rem.description.replace(/\s*\(Dose.*?\)/gi, '').trim() : '1 Dose');
+
+    const countMatch = rem.description ? (rem.description.match(/Dose\s*\d+\/(\d+)/i) || rem.description.match(/(\d+)\s*dose/i)) : null;
+    const doseCount = countMatch ? parseInt(countMatch[1], 10) : 1;
+
+    restoredMed = {
+      id: rawMedId || generateId(),
+      title: medName,
+      name: medName,
+      dosage: medDosage || 'Take prescribed dose',
+      doseCount: doseCount || 1,
+      times: ['08:00'],
+      scheduleType: rem.repeat === 'weekly' ? 'weekly' : 'daily',
+      takenTodayCount: 0
+    };
+  }
+
+  const existingIdx = health.medications.findIndex(m => m.id === restoredMed.id || (m.name && m.name.toLowerCase() === (restoredMed.name || '').toLowerCase()));
+  if (existingIdx !== -1) {
+    health.medications[existingIdx] = restoredMed;
+  } else {
+    health.medications.push(restoredMed);
+  }
+
+  userSettings.healthSettings = health;
+  await storage.saveSettings(userSettings);
+
+  await renderHealthHub();
+}
+
+async function handleRestoreReminder(id) {
+  const rem = archivedRemindersList.find(r => r.id === id);
+  if (!rem) return;
+
+  const isRecurring = rem.repeat && rem.repeat !== 'once';
+  const isFutureOneTime = (rem.repeat === 'once' || !rem.repeat) && rem.time && rem.time > Date.now() - 60000;
+
+  if (isRecurring || isFutureOneTime) {
+    await storage.restoreReminder(id);
+    activeRemindersList = await storage.getReminders();
+    await syncRestoredMedicationToHealthHub(rem);
+    if (typeof chrome !== 'undefined' && chrome.runtime) {
+      chrome.runtime.sendMessage({ action: 'REFRESH_ALARMS' });
+    }
+    await renderArchiveTable();
+    renderRemindersTable();
+    renderOverview();
+    showToast('Reminder & Health Hub medication restored! 🔄', 'success');
+  } else {
+    openRestoreModal(id);
+  }
+}
+
+function openRestoreModal(id) {
+  const rem = archivedRemindersList.find(r => r.id === id);
+  if (!rem) return;
+
+  restoringArchivedId = id;
+
+  const repeatPattern = rem.repeat || 'once';
+  document.getElementById('edit-rem-id').value = rem.id;
+  document.getElementById('edit-rem-title').value = cleanReminderTitle(rem.title);
+  document.getElementById('edit-rem-desc').value = rem.description || '';
+
+  const catDetails = getCategoryDetails(rem.category, userCustomCategories);
+  const catSelect = document.getElementById('edit-rem-category');
+  const customBox = document.getElementById('box-custom-category-fields');
+
+  if (catSelect) {
+    if (catSelect.querySelector(`option[value="${rem.category}"]`)) {
+      catSelect.value = rem.category;
+      if (customBox) customBox.style.display = 'none';
+    } else {
+      catSelect.value = 'new_custom';
+      if (customBox) customBox.style.display = 'block';
+      if (document.getElementById('edit-rem-custom-name')) document.getElementById('edit-rem-custom-name').value = catDetails.label || '';
+      if (document.getElementById('edit-rem-custom-emoji')) document.getElementById('edit-rem-custom-emoji').value = catDetails.icon || '';
+    }
+  }
+
+  document.getElementById('edit-rem-priority').value = rem.priority || 'medium';
+  document.getElementById('edit-rem-repeat').value = repeatPattern;
+
+  const targetTime = Date.now() + 10 * 60 * 1000;
+  if (document.getElementById('edit-rem-date')) {
+    document.getElementById('edit-rem-date').value = toInputDate(targetTime);
+  }
+  if (document.getElementById('edit-rem-time')) {
+    document.getElementById('edit-rem-time').value = toInputTime(targetTime);
+  }
+  if (document.getElementById('edit-rem-interval')) {
+    document.getElementById('edit-rem-interval').value = rem.repeatInterval || 15;
+  }
+  if (document.getElementById('edit-rem-status')) {
+    document.getElementById('edit-rem-status').value = 'true';
+  }
+
+  updateDynamicModalFields(repeatPattern);
+  document.getElementById('modal-reminder-title').textContent = '🔄 Restore & Reschedule Reminder';
+  document.getElementById('edit-reminder-modal').classList.add('active');
+  startLivePreviewCountdown();
+}
+
+function initTableScrollIndicators() {
+  const mgrContainer = document.getElementById('mgr-table-container');
+  const mgrIndicator = document.getElementById('mgr-scroll-indicator');
+
+  const checkScroll = (container, indicator) => {
+    if (!container || !indicator) return;
+    const canScrollMore = container.scrollTop + container.clientHeight < container.scrollHeight - 6;
+    if (canScrollMore) {
+      indicator.classList.remove('hidden');
+    } else {
+      indicator.classList.add('hidden');
+    }
+  };
+
+  if (mgrContainer && mgrIndicator) {
+    checkScroll(mgrContainer, mgrIndicator);
+    mgrContainer.onscroll = () => checkScroll(mgrContainer, mgrIndicator);
+  }
+
+  const arcContainer = document.getElementById('archive-table-container');
+  const arcIndicator = document.getElementById('archive-scroll-indicator');
+  if (arcContainer && arcIndicator) {
+    checkScroll(arcContainer, arcIndicator);
+    arcContainer.onscroll = () => checkScroll(arcContainer, arcIndicator);
+  }
+
+  const medList = document.getElementById('health-medications-list');
+  const medIndicator = document.getElementById('health-med-scroll-indicator');
+  if (medList && medIndicator) {
+    checkScroll(medList, medIndicator);
+    medList.onscroll = () => checkScroll(medList, medIndicator);
+  }
+}
+
 async function renderArchiveTable() {
   const tbody = document.getElementById('archive-table-body');
   if (!tbody) return;
@@ -2084,46 +3220,46 @@ async function renderArchiveTable() {
   if (filtered.length === 0) {
     safeSetHTML(tbody, `
       <tr>
-        <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 32px;">
-          📦 Archive is empty. No archived reminders found.
+        <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 32px;">
+          📦 No completed reminders found.
         </td>
       </tr>
     `);
+    initTableScrollIndicators();
     return;
   }
 
-  const html = filtered.map(rem => {
+  const html = filtered.map((rem, index) => {
     const cat = getCategoryDetails(rem.category, userCustomCategories);
     const prio = PRIORITIES[rem.priority?.toUpperCase()] || PRIORITIES.MEDIUM;
-    const archivedDateStr = rem.archivedAt ? new Date(rem.archivedAt).toLocaleString() : 'Passed';
+    const archivedDateStr = rem.archivedAt ? new Date(rem.archivedAt).toLocaleString() : 'Completed';
     const cleanTitle = cleanReminderTitle(rem.title);
 
+    const prioClass = `prio-row-${(rem.priority || 'medium').toLowerCase()}`;
+
     return `
-      <tr>
+      <tr class="${prioClass}">
+        <td style="text-align: center; font-weight: 700; color: var(--text-muted); font-size: 0.8rem;">${index + 1}</td>
         <td style="font-weight: 600;">${cat.icon} ${escapeHTML(cleanTitle)}</td>
-        <td>${cat.label}</td>
-        <td><span class="badge ${prio.badgeClass}">${prio.label}</span></td>
-        <td style="font-size: 0.825rem; color: var(--text-secondary);">${archivedDateStr}</td>
-        <td>
-          <button class="btn btn-danger btn-sm arc-act-del" data-id="${rem.id}">🗑️ Delete</button>
+        <td class="col-center">${cat.label}</td>
+        <td class="col-center"><span class="badge ${prio.badgeClass}">${prio.label}</span></td>
+        <td class="col-center" style="font-size: 0.825rem; color: var(--text-secondary); white-space: nowrap;">${archivedDateStr}</td>
+        <td class="col-center">
+          <div class="action-btn-group">
+            <button class="btn-icon-action arc-act-restore" data-id="${rem.id}" title="Restore & Reschedule Reminder">🔄</button>
+            <button class="btn-icon-action btn-del-action arc-act-del" data-id="${rem.id}" title="Delete Permanently">🗑️</button>
+          </div>
         </td>
       </tr>
     `;
   }).join('');
 
   safeSetHTML(tbody, html);
+  initTableScrollIndicators();
 
   tbody.querySelectorAll('.arc-act-restore').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      const id = e.currentTarget.dataset.id;
-      await storage.restoreReminder(id);
-      activeRemindersList = await storage.getReminders();
-      if (typeof chrome !== 'undefined' && chrome.runtime) {
-        chrome.runtime.sendMessage({ action: 'REFRESH_ALARMS' });
-      }
-      await renderArchiveTable();
-      renderRemindersTable();
-      renderOverview();
+    btn.addEventListener('click', (e) => {
+      handleRestoreReminder(e.currentTarget.dataset.id);
     });
   });
 
@@ -2206,10 +3342,9 @@ function renderPeriodTracker() {
 
   const cycleLength = periodConfig.cycleLength || 28;
   const periodDuration = periodConfig.periodDuration || 5;
-  const lastPeriod = new Date(periodConfig.lastPeriodDate);
+  const lastPeriod = parseLocalDate(periodConfig.lastPeriodDate);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  lastPeriod.setHours(0, 0, 0, 0);
 
   const daysSinceLast = Math.floor((today - lastPeriod) / (1000 * 60 * 60 * 24));
   const cycleDay = (daysSinceLast % cycleLength) + 1;
@@ -2251,8 +3386,41 @@ function renderPeriodTracker() {
   if (phaseEl) { phaseEl.textContent = phase; phaseEl.style.color = phaseColor; }
   if (fertilityEl) { fertilityEl.textContent = fertility; fertilityEl.style.color = fertilityColor; }
   if (ovulLabelEl) {
-    ovulLabelEl.textContent = `Ovulation expected around: ${nextOvulationDate.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}`;
+    const ovulStr = nextOvulationDate.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+    const remindDays = Number(periodConfig.remindDaysBefore ?? 3);
+    const remindTimeStr = periodConfig.remindTime || '09:00';
+    
+    // Calculate alert start date
+    const alertDate = new Date(nextPeriodDate);
+    alertDate.setDate(alertDate.getDate() - remindDays);
+    const formattedTime = formatTimeStringToUserDevice(remindTimeStr);
+    const alertDateStr = alertDate.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+
+    if (remindDays > 0) {
+      ovulLabelEl.innerHTML = `
+        <div>🥚 <strong>Ovulation expected around:</strong> ${ovulStr}</div>
+        <div style="margin-top: 6px; color: #f472b6; font-size: 0.775rem;">
+          ⏰ <strong>Pre-Period Reminder:</strong> Alerts from <strong>${alertDateStr} at ${formattedTime}</strong> (${remindDays} days before period).
+        </div>
+      `;
+    } else {
+      ovulLabelEl.innerHTML = `
+        <div>🥚 <strong>Ovulation expected around:</strong> ${ovulStr}</div>
+        <div style="margin-top: 6px; color: var(--text-muted); font-size: 0.775rem;">
+          🔕 Pre-Period Reminder is disabled.
+        </div>
+      `;
+    }
   }
+
+  // Early period log box visibility (strictly visible when daysToNext <= 10)
+  const earlyBox = document.getElementById('period-log-early-box');
+  if (earlyBox) {
+    earlyBox.style.display = daysToNext <= 10 ? 'flex' : 'none';
+  }
+
+  // Live 10-minute countdown for top header Undo button
+  updateUndoTimerCountdown();
 
   // Update badge
   if (badge) {
@@ -2270,10 +3438,10 @@ function renderPeriodTracker() {
     const markerPct = Math.round(((cycleDay - 1) / cycleLength) * 100);
 
     barEl.innerHTML = `
-      <div style="width:${mensPct}%; background:#ef4444; height:100%;"></div>
-      <div style="width:${follPct}%; background:#10b981; height:100%;"></div>
-      <div style="width:${ovulPct}%; background:#8b5cf6; height:100%;"></div>
-      <div style="width:${lutPct}%; background:#f59e0b; height:100%;"></div>
+      <div class="cycle-bar-segment" title="🩸 Menstruation Phase (Days 1–${periodDuration}): Active period. Prioritize rest, hydration & self-care." style="width:${mensPct}%; background:#ef4444;"></div>
+      <div class="cycle-bar-segment" title="🌿 Follicular Phase (Days ${periodDuration + 1}–${ovulationDay - 2}): Estrogen rising! High energy, mood & productivity." style="width:${follPct}%; background:#10b981;"></div>
+      <div class="cycle-bar-segment" title="🥚 Ovulation Window (Days ${ovulationDay - 1}–${ovulationDay + 2}): Peak fertility window! High energy & confidence." style="width:${ovulPct}%; background:#8b5cf6;"></div>
+      <div class="cycle-bar-segment" title="🍂 Luteal Phase (Days ${ovulationDay + 3}–${cycleLength}): Progesterone rising. Prepare for cycle reset; focus on nourishment & rest." style="width:${lutPct}%; background:#f59e0b;"></div>
     `;
 
     // Position marker overlay
@@ -2282,7 +3450,7 @@ function renderPeriodTracker() {
     if (existingMarker) existingMarker.remove();
     const marker = document.createElement('div');
     marker.className = 'cycle-day-marker';
-    marker.style.cssText = `position:absolute; left:${markerPct}%; top:-3px; width:4px; height:18px; background:#ffffff; border-radius:2px; box-shadow:0 0 6px rgba(255,255,255,0.6); transform:translateX(-50%);`;
+    marker.style.cssText = `position:absolute; left:${markerPct}%; top:-4px; width:6px; height:20px; background:var(--text-primary, #ffffff); border:1px solid rgba(0,0,0,0.5); border-radius:3px; box-shadow:0 2px 6px rgba(0,0,0,0.4), 0 0 6px rgba(255,255,255,0.8); transform:translateX(-50%); z-index:10;`;
     barEl.style.position = 'relative';
     barEl.parentElement.style.position = 'relative';
     barEl.parentElement.appendChild(marker);
@@ -2311,7 +3479,7 @@ function initHealthHub() {
     promptDashEarlyLogConfirm(
       '💧',
       'Hydration Check',
-      'Did you just drink a glass of water or is this a test log? 😄',
+      'Did you just drink a glass of water? 💧',
       doLog
     );
   });
@@ -2340,29 +3508,58 @@ function initHealthHub() {
   });
 
   // Save Health Preferences & Auto-Generate Active Reminders for Water, Eye Rest, Posture!
-  const saveHealthConfig = async (msg) => {
+  const saveHealthConfig = async (msg, targetCard = null) => {
     const health = userSettings.healthSettings || {};
-    health.waterGoal = parseInt(document.getElementById('health-water-goal-input')?.value, 10) || 8;
-    
-    const waterSel = document.getElementById('health-water-freq-select')?.value;
-    health.waterIntervalMinutes = waterSel === 'custom' 
-      ? (parseInt(document.getElementById('health-water-custom-input')?.value, 10) || 60)
-      : (parseInt(waterSel, 10) || 60);
 
-    health.eyeRestEnabled = document.getElementById('health-eye-enabled-select')?.value === 'true';
-    const eyeSel = document.getElementById('health-eye-freq-select')?.value;
-    health.eyeRestIntervalMinutes = eyeSel === 'custom'
-      ? (parseInt(document.getElementById('health-eye-custom-input')?.value, 10) || 20)
-      : (parseInt(eyeSel, 10) || 20);
+    health.waterEnabled = health.waterEnabled !== false;
+    health.eyeRestEnabled = health.eyeRestEnabled !== false;
+    health.postureEnabled = health.postureEnabled !== false;
 
-    health.postureEnabled = document.getElementById('health-posture-enabled-select')?.value === 'true';
-    const postureSel = document.getElementById('health-posture-freq-select')?.value;
-    health.postureIntervalMinutes = postureSel === 'custom'
-      ? (parseInt(document.getElementById('health-posture-custom-input')?.value, 10) || 45)
-      : (parseInt(postureSel, 10) || 45);
+    if (!targetCard || targetCard === 'water') {
+      const wEnabledEl = document.getElementById('health-water-enabled-select');
+      if (wEnabledEl && healthEditModes.water) {
+        health.waterEnabled = wEnabledEl.value === 'true';
+      }
+      const wGoalInput = document.getElementById('health-water-goal-input');
+      if (wGoalInput && healthEditModes.water) {
+        health.waterGoal = parseInt(wGoalInput.value, 10) || 8;
+      }
+      const waterSel = document.getElementById('health-water-freq-select')?.value;
+      if (waterSel && healthEditModes.water) {
+        health.waterIntervalMinutes = waterSel === 'custom' 
+          ? (parseInt(document.getElementById('health-water-custom-input')?.value, 10) || 60)
+          : (parseInt(waterSel, 10) || 60);
+      }
+    }
+
+    if (!targetCard || targetCard === 'eye') {
+      const eEnabledEl = document.getElementById('health-eye-enabled-select');
+      if (eEnabledEl && healthEditModes.eye) {
+        health.eyeRestEnabled = eEnabledEl.value === 'true';
+      }
+      const eyeSel = document.getElementById('health-eye-freq-select')?.value;
+      if (eyeSel && healthEditModes.eye) {
+        health.eyeRestIntervalMinutes = eyeSel === 'custom'
+          ? (parseInt(document.getElementById('health-eye-custom-input')?.value, 10) || 20)
+          : (parseInt(eyeSel, 10) || 20);
+      }
+    }
+
+    if (!targetCard || targetCard === 'posture') {
+      const pEnabledEl = document.getElementById('health-posture-enabled-select');
+      if (pEnabledEl && healthEditModes.posture) {
+        health.postureEnabled = pEnabledEl.value === 'true';
+      }
+      const postureSel = document.getElementById('health-posture-freq-select')?.value;
+      if (postureSel && healthEditModes.posture) {
+        health.postureIntervalMinutes = postureSel === 'custom'
+          ? (parseInt(document.getElementById('health-posture-custom-input')?.value, 10) || 45)
+          : (parseInt(postureSel, 10) || 45);
+      }
+    }
 
     userSettings.healthSettings = health;
-    userSettings.waterGoalGlasses = health.waterGoal;
+    if (health.waterGoal) userSettings.waterGoalGlasses = health.waterGoal;
     await storage.saveSettings(userSettings);
 
     // Sync active recurring reminders for Hydration, Eye Rest, and Posture
@@ -2377,16 +3574,17 @@ function initHealthHub() {
   document.getElementById('btn-save-health-settings')?.addEventListener('click', () => saveHealthConfig('All Health & Wellness preferences saved!'));
 
   // Open Custom Add Medication Modal
-
-  // Open Custom Add Medication Modal
   const medModal = document.getElementById('modal-add-medication');
-  document.getElementById('btn-add-medication')?.addEventListener('click', () => {
+  document.getElementById('btn-add-medication-modal')?.addEventListener('click', () => {
+    document.getElementById('med-edit-id').value = '';
+    document.getElementById('med-modal-title-text').textContent = 'Add Medication Schedule';
     document.getElementById('med-name-input').value = '';
     document.getElementById('med-dosage-input').value = '';
     document.getElementById('med-schedule-type-select').value = 'daily';
     document.getElementById('grp-med-weekly-day').style.display = 'none';
+    document.getElementById('med-time-format-select').value = '12h';
     document.getElementById('med-freq-count-input').value = '2';
-    renderDynamicMedDoseTimeFields(2);
+    renderDynamicMedDoseTimeFields(2, ['08:00', '14:00']);
     if (medModal) medModal.style.display = 'flex';
   });
 
@@ -2413,6 +3611,7 @@ function initHealthHub() {
 
   // Save Medication Schedule & Create ONE Unified Single Reminder Entry
   document.getElementById('btn-save-med-schedule')?.addEventListener('click', async () => {
+    const editingId = document.getElementById('med-edit-id')?.value;
     const title = document.getElementById('med-name-input')?.value.trim();
     if (!title) {
       showToast('Please enter a medication / pill name.', 'warning');
@@ -2421,6 +3620,7 @@ function initHealthHub() {
     const dosage = document.getElementById('med-dosage-input')?.value.trim() || 'Take prescribed dose';
     const scheduleType = document.getElementById('med-schedule-type-select')?.value || 'daily';
     const weeklyDay = document.getElementById('med-weekly-day-select')?.value || '1';
+    const timeFormat = document.getElementById('med-time-format-select')?.value || '12h';
     const doseCount = Math.max(1, Math.min(24, parseInt(document.getElementById('med-freq-count-input')?.value, 10) || 1));
 
     const times = [];
@@ -2432,17 +3632,37 @@ function initHealthHub() {
     const health = userSettings.healthSettings || {};
     health.medications = health.medications || [];
 
-    const medId = 'med_' + Date.now();
-    health.medications.push({
-      id: medId,
-      title: title,
-      dosage: dosage,
-      scheduleType: scheduleType,
-      weeklyDay: weeklyDay,
-      doseCount: doseCount,
-      times: times,
-      takenTodayCount: 0
-    });
+    let medId = editingId;
+    if (editingId) {
+      const idx = health.medications.findIndex(m => m.id === editingId);
+      if (idx !== -1) {
+        health.medications[idx] = {
+          ...health.medications[idx],
+          name: title,
+          title: title,
+          dosage: dosage,
+          scheduleType: scheduleType,
+          weeklyDay: weeklyDay,
+          timeFormat: timeFormat,
+          doseCount: doseCount,
+          times: times
+        };
+      }
+    } else {
+      medId = 'med_' + Date.now();
+      health.medications.push({
+        id: medId,
+        name: title,
+        title: title,
+        dosage: dosage,
+        scheduleType: scheduleType,
+        weeklyDay: weeklyDay,
+        timeFormat: timeFormat,
+        doseCount: doseCount,
+        times: times,
+        takenTodayCount: 0
+      });
+    }
 
     userSettings.healthSettings = health;
     await storage.saveSettings(userSettings);
@@ -2457,10 +3677,14 @@ function initHealthHub() {
     // Filter out old individual reminders for this med if any
     activeRemindersList = activeRemindersList.filter(r => !r.id.startsWith(`med_rem_${medId}`));
 
+    const initialDoseDesc = (dosage && dosage !== 'Take prescribed dose')
+      ? `${dosage} (Dose 1/${doseCount})`
+      : `Dose 1/${doseCount}`;
+
     const unifiedRem = {
       id: `med_rem_${medId}`,
       title: title,
-      description: `${dosage} (${doseCount} dose(s) scheduled: ${times.join(', ')})`,
+      description: initialDoseDesc,
       category: 'medicine',
       priority: 'high',
       repeat: scheduleType === 'weekly' ? 'weekly' : 'daily',
@@ -2480,17 +3704,45 @@ function initHealthHub() {
     if (medModal) medModal.style.display = 'none';
     await renderHealthHub();
     renderOverview();
+    showToast(editingId ? 'Medication schedule updated! 💊' : 'Medication schedule added! 💊', 'success');
   });
 }
 
-function renderDynamicMedDoseTimeFields(count) {
+function openEditMedicationModal(medId) {
+  const medModal = document.getElementById('modal-add-medication');
+  if (!medModal) return;
+
+  const health = userSettings.healthSettings || {};
+  const meds = health.medications || [];
+  const med = meds.find(m => m.id === medId || m.id === 'med_' + medId);
+  if (!med) return;
+
+  document.getElementById('med-edit-id').value = med.id;
+  document.getElementById('med-modal-title-text').textContent = 'Edit Medication Schedule';
+  document.getElementById('med-name-input').value = med.name || med.title || '';
+  document.getElementById('med-dosage-input').value = med.dosage || '';
+  document.getElementById('med-schedule-type-select').value = med.scheduleType || 'daily';
+  document.getElementById('med-weekly-day-select').value = med.weeklyDay || '1';
+  document.getElementById('med-time-format-select').value = med.timeFormat || '12h';
+
+  const count = med.doseCount || (med.times ? med.times.length : 2);
+  document.getElementById('med-freq-count-input').value = count;
+  document.getElementById('grp-med-weekly-day').style.display = (med.scheduleType === 'weekly') ? 'block' : 'none';
+
+  renderDynamicMedDoseTimeFields(count, med.times || ['08:00', '14:00']);
+  medModal.style.display = 'flex';
+}
+
+function renderDynamicMedDoseTimeFields(count, presetTimes = null) {
   const container = document.getElementById('med-dose-times-container');
   if (!container) return;
 
-  const existingTimes = [];
-  container.querySelectorAll('input[type="time"]').forEach(input => {
-    existingTimes.push(input.value);
-  });
+  const existingTimes = presetTimes || [];
+  if (!presetTimes) {
+    container.querySelectorAll('input[type="time"]').forEach(input => {
+      existingTimes.push(input.value);
+    });
+  }
 
   container.innerHTML = '';
   const defaultTimes = ['08:00', '14:00', '20:00', '22:00', '06:00', '12:00', '18:00', '23:00'];
@@ -2544,55 +3796,59 @@ function autoCalculateMedTimes() {
 
 async function syncHealthReminders(health) {
   const now = Date.now();
-  let list = activeRemindersList.filter(r => !r.id.startsWith('auto_health_'));
 
-  const waterMins = health.waterIntervalMinutes || 60;
-  list.push({
-    id: 'auto_health_water',
-    title: '💧 Hydration Break - Drink Water',
-    description: 'Drink 1 glass of water to stay hydrated and energized!',
-    category: 'water',
-    priority: 'medium',
-    repeat: 'every_x_minutes',
-    repeatInterval: waterMins,
-    time: now + waterMins * 60 * 1000,
-    enabled: true,
-    created: now
-  });
+  const upsertHealthRem = (id, title, desc, cat, defaultMins, isEnabled) => {
+    const mins = health[`${cat === 'water' ? 'waterIntervalMinutes' : cat === 'eye' ? 'eyeRestIntervalMinutes' : 'postureIntervalMinutes'}`] || defaultMins;
+    const existing = activeRemindersList.find(r => r.id === id);
+    if (existing) {
+      existing.enabled = isEnabled;
+      existing.repeatInterval = mins;
+      if (!existing.time || existing.time < now) {
+        existing.time = now + mins * 60 * 1000;
+      }
+    } else {
+      activeRemindersList.push({
+        id: id,
+        title: title,
+        description: desc,
+        category: cat,
+        priority: 'medium',
+        repeat: 'every_x_minutes',
+        repeatInterval: mins,
+        time: now + mins * 60 * 1000,
+        enabled: isEnabled,
+        created: now
+      });
+    }
+  };
 
-  if (health.eyeRestEnabled !== false) {
-    const eyeMins = health.eyeRestIntervalMinutes || 20;
-    list.push({
-      id: 'auto_health_eye',
-      title: '👀 Eye Rest (20-20-20 Rule)',
-      description: 'Look away from your screen at an object 20 feet away for 20 seconds!',
-      category: 'eye',
-      priority: 'medium',
-      repeat: 'every_x_minutes',
-      repeatInterval: eyeMins,
-      time: now + eyeMins * 60 * 1000,
-      enabled: true,
-      created: now
-    });
-  }
+  upsertHealthRem(
+    'auto_health_water',
+    '💧 Hydration Break - Drink Water',
+    'Time for a quick hydration break! Take a sip of water to stay refreshed, focused, and healthy. 🥛✨',
+    'water',
+    60,
+    health.waterEnabled !== false
+  );
 
-  if (health.postureEnabled !== false) {
-    const postureMins = health.postureIntervalMinutes || 45;
-    list.push({
-      id: 'auto_health_posture',
-      title: '🧍 Posture Check & Stretch Break',
-      description: 'Adjust your back posture, roll your shoulders, and stand up to stretch!',
-      category: 'posture',
-      priority: 'medium',
-      repeat: 'every_x_minutes',
-      repeatInterval: postureMins,
-      time: now + postureMins * 60 * 1000,
-      enabled: true,
-      created: now
-    });
-  }
+  upsertHealthRem(
+    'auto_health_eye',
+    '👀 Eye Rest',
+    "Now's the time to follow the 20-20-20 rule! Look at an object 20 feet away for 20 seconds to protect your eyes. 👀✨",
+    'eye',
+    20,
+    health.eyeRestEnabled !== false
+  );
 
-  activeRemindersList = list;
+  upsertHealthRem(
+    'auto_health_posture',
+    '🧍 Posture Check & Stretch Break',
+    'Time for a quick posture break! Stretch your spine, roll your shoulders back, and stand up to stay energized. 🧍✨',
+    'posture',
+    45,
+    health.postureEnabled !== false
+  );
+
   await storage.saveReminders(activeRemindersList);
   if (typeof chrome !== 'undefined' && chrome.runtime) {
     chrome.runtime.sendMessage({ action: 'REFRESH_ALARMS' });
@@ -2612,7 +3868,7 @@ function bindHealthHubCardButtonEvents() {
     await renderHealthHub();
   });
   document.getElementById('btn-save-water')?.addEventListener('click', async () => {
-    if (window._saveHealthConfig) await window._saveHealthConfig('Hydration Tracker settings saved!');
+    if (window._saveHealthConfig) await window._saveHealthConfig('Hydration Tracker settings saved!', 'water');
     healthEditModes.water = false;
     await renderHealthHub();
   });
@@ -2627,7 +3883,7 @@ function bindHealthHubCardButtonEvents() {
     await renderHealthHub();
   });
   document.getElementById('btn-save-eye')?.addEventListener('click', async () => {
-    if (window._saveHealthConfig) await window._saveHealthConfig('Eye Rest settings saved!');
+    if (window._saveHealthConfig) await window._saveHealthConfig('Eye Rest settings saved!', 'eye');
     healthEditModes.eye = false;
     await renderHealthHub();
   });
@@ -2642,7 +3898,7 @@ function bindHealthHubCardButtonEvents() {
     await renderHealthHub();
   });
   document.getElementById('btn-save-posture')?.addEventListener('click', async () => {
-    if (window._saveHealthConfig) await window._saveHealthConfig('Posture Break settings saved!');
+    if (window._saveHealthConfig) await window._saveHealthConfig('Posture Break settings saved!', 'posture');
     healthEditModes.posture = false;
     await renderHealthHub();
   });
@@ -2653,6 +3909,7 @@ function bindHealthHubCardButtonEvents() {
 }
 
 async function renderHealthHub() {
+  renderPeriodTracker();
   const stats = await storage.getDailyStats();
   const health = userSettings.healthSettings || {};
 
@@ -2675,7 +3932,20 @@ async function renderHealthHub() {
   }
 
   // Hydration Card Edit/Save/Cancel State
+  const waterRem = activeRemindersList.find(r => r.id === 'auto_health_water' || r.category === 'water');
+  const eyeRem = activeRemindersList.find(r => r.id === 'auto_health_eye' || r.category === 'eye');
+  const postureRem = activeRemindersList.find(r => r.id === 'auto_health_posture' || r.category === 'posture');
+
+  const isWaterActive = health.waterEnabled !== false && (!waterRem || waterRem.enabled !== false);
+  const isEyeActive = health.eyeRestEnabled !== false && (!eyeRem || eyeRem.enabled !== false);
+  const isPostureActive = health.postureEnabled !== false && (!postureRem || postureRem.enabled !== false);
+
   const isWaterEditing = !!healthEditModes.water;
+  const waterEnabledSelect = document.getElementById('health-water-enabled-select');
+  if (waterEnabledSelect) {
+    waterEnabledSelect.value = isWaterActive ? 'true' : 'false';
+    waterEnabledSelect.disabled = !isWaterEditing;
+  }
   const waterGoalInput = document.getElementById('health-water-goal-input');
   if (waterGoalInput) {
     waterGoalInput.value = waterGoal;
@@ -2710,7 +3980,7 @@ async function renderHealthHub() {
         </div>
       `;
     } else {
-      grpWater.innerHTML = `<button class="btn btn-secondary btn-sm" id="btn-edit-water">✏️ Edit</button>`;
+      grpWater.innerHTML = `<button class="btn btn-ghost btn-sm" id="btn-edit-water" title="Edit Hydration Settings" style="padding: 4px 6px;">✏️</button>`;
     }
   }
 
@@ -2718,7 +3988,7 @@ async function renderHealthHub() {
   const isEyeEditing = !!healthEditModes.eye;
   const eyeEnabled = document.getElementById('health-eye-enabled-select');
   if (eyeEnabled) {
-    eyeEnabled.value = String(health.eyeRestEnabled !== false);
+    eyeEnabled.value = isEyeActive ? 'true' : 'false';
     eyeEnabled.disabled = !isEyeEditing;
   }
 
@@ -2750,7 +4020,7 @@ async function renderHealthHub() {
         </div>
       `;
     } else {
-      grpEye.innerHTML = `<button class="btn btn-secondary btn-sm" id="btn-edit-eye">✏️ Edit</button>`;
+      grpEye.innerHTML = `<button class="btn btn-ghost btn-sm" id="btn-edit-eye" title="Edit Eye Rest Settings" style="padding: 4px 6px;">✏️</button>`;
     }
   }
 
@@ -2758,7 +4028,7 @@ async function renderHealthHub() {
   const isPostureEditing = !!healthEditModes.posture;
   const postureEnabled = document.getElementById('health-posture-enabled-select');
   if (postureEnabled) {
-    postureEnabled.value = String(health.postureEnabled !== false);
+    postureEnabled.value = isPostureActive ? 'true' : 'false';
     postureEnabled.disabled = !isPostureEditing;
   }
 
@@ -2790,7 +4060,7 @@ async function renderHealthHub() {
         </div>
       `;
     } else {
-      grpPosture.innerHTML = `<button class="btn btn-secondary btn-sm" id="btn-edit-posture">✏️ Edit</button>`;
+      grpPosture.innerHTML = `<button class="btn btn-ghost btn-sm" id="btn-edit-posture" title="Edit Posture Settings" style="padding: 4px 6px;">✏️</button>`;
     }
   }
 
@@ -2811,7 +4081,7 @@ async function renderHealthHub() {
         totalDoses += (m.doseCount || 1);
         takenDoses += (m.takenTodayCount || 0);
       });
-      medsCountEl.innerHTML = `<strong style="color: #ec4899;">${meds.length} Pill${meds.length > 1 ? 's' : ''} Active</strong> • Doses Taken: <strong style="color: ${takenDoses >= totalDoses ? '#10b981' : '#ec4899'};">${takenDoses} / ${totalDoses}</strong>`;
+      medsCountEl.innerHTML = `<strong style="color: #ec4899;">${meds.length} Pill${meds.length > 1 ? 's' : ''} Active</strong>`;
     }
   }
 
@@ -2824,8 +4094,13 @@ async function renderHealthHub() {
       `;
     } else {
       medBox.innerHTML = meds.map(m => {
-        const timesStr = Array.isArray(m.times) ? m.times.join(', ') : (m.timeStr || '08:00');
-        const dosageStr = m.dosage ? ` • ${escapeHTML(m.dosage)}` : '';
+        const fmt = m.timeFormat || '12h';
+        const timesStr = Array.isArray(m.times)
+          ? m.times.map(t => formatTimeStringToUserDevice(t, fmt)).join(', ')
+          : formatTimeStringToUserDevice(m.timeStr || '08:00', fmt);
+        const dosageHtml = (m.dosage && m.dosage !== 'Take prescribed dose')
+          ? `<div style="margin-top: 3px; color: var(--text-muted); font-size: 0.75rem;">📝 ${escapeHTML(m.dosage)}</div>`
+          : '';
         const taken = m.takenTodayCount || 0;
         const total = m.doseCount || 1;
         const isGoalMet = taken >= total;
@@ -2839,26 +4114,38 @@ async function renderHealthHub() {
         const logBtnHtml = taken < total ? `<button class="btn btn-secondary btn-sm med-log-btn" data-id="${m.id}" style="padding: 4px 12px; font-size: 0.75rem; white-space: nowrap;">+1 Dose</button>` : '';
 
         return `
-          <div style="display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 8px; border: 1px solid var(--glass-border); margin-bottom: 8px;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <div>
-                <strong style="font-size: 0.95rem; color: var(--text-primary);">${escapeHTML(cleanMedTitle)}</strong>
-                <div style="font-size: 0.775rem; color: var(--text-secondary); margin-top: 2px;">
-                  Schedule: <strong>${timesStr}</strong>${dosageStr}
-                </div>
-              </div>
-              <div style="display: flex; align-items: center; gap: 6px;">
+          <div style="display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: 8px; border: 1px solid var(--glass-border); margin-bottom: 0; width: 100%; box-sizing: border-box;">
+            <!-- Header Row: Title & Action Buttons -->
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; min-width: 0;">
+              <strong class="med-card-title" style="font-size: 0.95rem; color: var(--text-primary); min-width: 0; flex: 1;">${escapeHTML(cleanMedTitle)}</strong>
+              <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
                 ${unlogBtnHtml}
                 ${logBtnHtml}
+                <button class="btn btn-ghost btn-sm med-edit-btn" data-id="${m.id}" style="color: var(--text-muted); padding: 4px 6px;" title="Edit Medication">✏️</button>
                 <button class="btn btn-ghost btn-sm med-del-btn" data-id="${m.id}" style="color: var(--text-muted); padding: 4px 6px;" title="Delete Medication">🗑️</button>
               </div>
             </div>
-            <div style="font-size: 0.8rem; color: var(--text-secondary); display: flex; justify-content: space-between; align-items: center;">
+
+            <!-- Schedule & Notes Row: Full Width Below Header -->
+            <div class="med-card-notes" style="font-size: 0.775rem; color: var(--text-secondary); width: 100%;">
+              <div>Schedule: <strong>${timesStr}</strong></div>
+              ${dosageHtml}
+            </div>
+
+            <!-- Footer Row: Progress Status -->
+            <div style="font-size: 0.8rem; color: var(--text-secondary); display: flex; justify-content: space-between; align-items: center; margin-top: 2px;">
               ${progressStr}
             </div>
           </div>
         `;
       }).join('');
+
+      medBox.querySelectorAll('.med-edit-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          const id = e.currentTarget.dataset.id;
+          openEditMedicationModal(id);
+        });
+      });
 
       medBox.querySelectorAll('.med-log-btn').forEach(btn => {
         btn.addEventListener('click', async (e) => {
@@ -2913,23 +4200,44 @@ async function renderHealthHub() {
       medBox.querySelectorAll('.med-del-btn').forEach(btn => {
         btn.addEventListener('click', async (e) => {
           const id = e.currentTarget.dataset.id;
-          health.medications = (health.medications || []).filter(m => m.id !== id);
-          userSettings.healthSettings = health;
-          await storage.saveSettings(userSettings);
+          const medToRemove = (health.medications || []).find(m => m.id === id);
+          if (medToRemove) {
+            const medRem = activeRemindersList.find(r => r.id.startsWith(`med_rem_${id}`));
+            const archivePayload = {
+              ...(medRem || {}),
+              id: `med_rem_${medToRemove.id}`,
+              title: medRem ? medRem.title : (medToRemove.title || medToRemove.name || 'Medication'),
+              description: medRem ? medRem.description : (medToRemove.dosage || `Dose 1/${medToRemove.doseCount || 1}`),
+              category: 'medicine',
+              priority: 'high',
+              repeat: medToRemove.scheduleType === 'weekly' ? 'weekly' : 'daily',
+              time: medRem ? medRem.time : Date.now(),
+              medData: { ...medToRemove }
+            };
 
-          // Also remove associated active medication reminders
-          activeRemindersList = activeRemindersList.filter(r => !r.id.startsWith(`med_rem_${id}`));
-          await storage.saveReminders(activeRemindersList);
-          if (typeof chrome !== 'undefined' && chrome.runtime) {
-            chrome.runtime.sendMessage({ action: 'REFRESH_ALARMS' });
+            await storage.archiveReminder(archivePayload);
+
+            health.medications = (health.medications || []).filter(m => m.id !== id);
+            userSettings.healthSettings = health;
+            await storage.saveSettings(userSettings);
+
+            activeRemindersList = activeRemindersList.filter(r => !r.id.startsWith(`med_rem_${id}`));
+            await storage.saveReminders(activeRemindersList);
+            if (typeof chrome !== 'undefined' && chrome.runtime) {
+              chrome.runtime.sendMessage({ action: 'REFRESH_ALARMS' });
+            }
+
+            await renderArchiveTable();
+            renderHealthHub();
+            renderOverview();
+            showToast('Medication schedule moved to Completed Reminders (Archive) 📦', 'success');
           }
-
-          renderHealthHub();
-          renderOverview();
         });
       });
     }
   }
+
+  initTableScrollIndicators();
 }
 
 function escapeHTML(str) {

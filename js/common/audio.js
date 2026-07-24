@@ -39,7 +39,7 @@ class SoundEngine {
     return this.audioCtx;
   }
 
-  async playChime(tone = 'chime', volumePercent = 80) {
+  async playChime(tone = 'chime', volumePercent = 100) {
     const ctx = await this.getAudioContext();
     if (!ctx) return;
 

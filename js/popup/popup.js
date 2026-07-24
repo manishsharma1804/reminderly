@@ -8,6 +8,11 @@ import { generateId, formatRelativeTime, toInputDate, toInputTime, parseDateTime
 
 let focusTimerInterval = null;
 let popCustomCategories = [];
+let currentCategoryFilter = 'all';
+let currentTimeFilter = 'today';
+
+const savedFocusHidden = localStorage.getItem('reminderly_focus_hidden');
+let isFocusWidgetHidden = savedFocusHidden === null ? true : savedFocusHidden === 'true';
 
 document.addEventListener('DOMContentLoaded', async () => {
   await loadTheme();
@@ -28,9 +33,54 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Event Listeners
   document.getElementById('btn-theme-toggle')?.addEventListener('click', toggleTheme);
+  document.getElementById('btn-theme-toggle-quick')?.addEventListener('click', toggleTheme);
   document.getElementById('btn-open-dashboard')?.addEventListener('click', openDashboard);
+  document.getElementById('btn-open-dashboard-quick')?.addEventListener('click', openDashboard);
   document.getElementById('btn-log-water')?.addEventListener('click', handleLogWaterClick);
   document.getElementById('btn-unlog-water')?.addEventListener('click', unlogWater);
+
+  // Focus Widget Hide / Unhide Listeners
+  document.getElementById('btn-hide-focus')?.addEventListener('click', () => {
+    isFocusWidgetHidden = true;
+    localStorage.setItem('reminderly_focus_hidden', 'true');
+    refreshUI();
+  });
+  document.getElementById('btn-unhide-focus')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    isFocusWidgetHidden = false;
+    localStorage.setItem('reminderly_focus_hidden', 'false');
+    refreshUI();
+  });
+  document.getElementById('focus-tab-bar')?.addEventListener('click', () => {
+    isFocusWidgetHidden = false;
+    localStorage.setItem('reminderly_focus_hidden', 'false');
+    refreshUI();
+  });
+
+  // Filter Icon & Filter Bar Listeners
+  document.getElementById('btn-filter-reminders')?.addEventListener('click', () => {
+    const filterBar = document.getElementById('reminders-filter-bar');
+    if (filterBar) {
+      const isHidden = filterBar.style.display === 'none' || !filterBar.style.display;
+      filterBar.style.display = isHidden ? 'block' : 'none';
+    }
+  });
+
+  document.getElementById('filter-select-time')?.addEventListener('change', (e) => {
+    currentTimeFilter = e.target.value;
+    updateFilterActiveIndicator();
+    refreshUI();
+  });
+
+  document.getElementById('filter-select-category')?.addEventListener('change', (e) => {
+    currentCategoryFilter = e.target.value;
+    updateFilterActiveIndicator();
+    refreshUI();
+  });
+
+  document.getElementById('btn-clear-filter-badge')?.addEventListener('click', () => {
+    resetFilters();
+  });
 
   // Quick Add Modal Listeners
   document.getElementById('new-rem-repeat')?.addEventListener('change', (e) => {
@@ -83,10 +133,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (document.getElementById('new-rem-custom-emoji')) document.getElementById('new-rem-custom-emoji').value = '';
 
     const catSelect = document.getElementById('new-rem-category');
-    if (catSelect) catSelect.value = 'new_custom';
+    if (catSelect) catSelect.value = '';
 
     const box = document.getElementById('box-pop-custom-category-fields');
-    if (box) box.style.display = 'flex';
+    if (box) box.style.display = 'none';
+
+    if (document.getElementById('new-rem-notes')) {
+      document.getElementById('new-rem-notes').value = '';
+    }
 
     updateQuickAddFields('once');
     document.getElementById('quick-add-modal')?.classList.add('active');
@@ -109,6 +163,88 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   setInterval(updateAllLiveCountdowns, 1000);
 });
+
+function resetFilters() {
+  currentTimeFilter = 'today';
+  currentCategoryFilter = 'all';
+  const timeSelect = document.getElementById('filter-select-time');
+  const catSelect = document.getElementById('filter-select-category');
+  if (timeSelect) timeSelect.value = 'today';
+  if (catSelect) catSelect.value = 'all';
+  updateFilterActiveIndicator();
+  refreshUI();
+}
+
+function updateFilterActiveIndicator() {
+  const isFiltered = currentTimeFilter !== 'today' || currentCategoryFilter !== 'all';
+  const filterDot = document.getElementById('filter-active-dot');
+  const filterBtn = document.getElementById('btn-filter-reminders');
+  const badge = document.getElementById('filter-summary-badge');
+  const badgeText = document.getElementById('filter-summary-text');
+
+  if (filterDot) filterDot.style.display = isFiltered ? 'block' : 'none';
+  if (filterBtn) filterBtn.classList.toggle('active', isFiltered);
+
+  if (badge && badgeText) {
+    if (isFiltered) {
+      const timeLabels = { all: 'All Time', today: 'Today', week: 'This Week', month: 'This Month' };
+      const catLabels = {
+        all: 'All Categories',
+        health: '💧 Health',
+        workout: '🏋️ Workout',
+        study: '📚 Study',
+        meetings: '📅 Meetings',
+        reading: '📖 Reading',
+        break: '☕ Break',
+        sleep: '🌙 Sleep',
+        custom: 'Custom'
+      };
+
+      let catPart = catLabels[currentCategoryFilter];
+      if (!catPart) {
+        const foundCustom = (popCustomCategories || []).find(c => c.id === currentCategoryFilter);
+        if (foundCustom) {
+          catPart = (foundCustom.icon ? foundCustom.icon + ' ' : '') + foundCustom.label;
+        } else {
+          catPart = 'Custom';
+        }
+      }
+      const timePart = timeLabels[currentTimeFilter] || 'All Time';
+      badgeText.textContent = `Showing: ${timePart} • ${catPart}`;
+      badge.style.display = 'flex';
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+}
+
+function matchesTimeFilter(rem, timeFilter) {
+  if (timeFilter === 'all') return true;
+  if (!rem.time) return true; // health / interval reminders without static target date
+  
+  const now = new Date();
+  const remTime = parseInt(rem.time, 10);
+  if (!remTime) return true;
+
+  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+
+  if (timeFilter === 'today') {
+    const endOfDay = startOfDay + 24 * 60 * 60 * 1000 - 1;
+    return remTime <= endOfDay;
+  }
+
+  if (timeFilter === 'week') {
+    const endOfWeek = startOfDay + 7 * 24 * 60 * 60 * 1000;
+    return remTime <= endOfWeek;
+  }
+
+  if (timeFilter === 'month') {
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999).getTime();
+    return remTime <= endOfMonth;
+  }
+
+  return true;
+}
 
 function updateAllLiveCountdowns() {
   document.querySelectorAll('.live-countdown').forEach(el => {
@@ -233,10 +369,11 @@ async function loadTheme() {
   }
   document.documentElement.setAttribute('data-theme', effectiveTheme);
   document.body.setAttribute('data-theme', effectiveTheme);
+  const iconSymbol = effectiveTheme === 'light' ? '☀️' : '🌙';
   const iconBtn = document.getElementById('btn-theme-toggle');
-  if (iconBtn) {
-    iconBtn.textContent = effectiveTheme === 'light' ? '☀️' : '🌙';
-  }
+  const iconBtnQuick = document.getElementById('btn-theme-toggle-quick');
+  if (iconBtn) iconBtn.textContent = iconSymbol;
+  if (iconBtnQuick) iconBtnQuick.textContent = iconSymbol;
 }
 
 async function toggleTheme() {
@@ -263,6 +400,7 @@ function openDashboard() {
 }
 
 async function refreshUI() {
+  await populateQuickAddCategories();
   const stats = await storage.getDailyStats();
   const queue = await storage.getPendingQueue();
   const reminders = await storage.getReminders();
@@ -272,51 +410,57 @@ async function refreshUI() {
   // Check restorable streak
   const allStats = await storage.getAllDailyStats();
   const restorable = checkRestorableStreak(allStats);
-  const restoreContainer = document.getElementById('streak-restore-container');
-  if (restoreContainer) {
-    if (restorable) {
-      restoreContainer.innerHTML = `
-        <div class="glass-card streak-restore-widget" style="background: linear-gradient(135deg, rgba(239, 68, 68, 0.15) 0%, rgba(245, 158, 11, 0.15) 100%); border: 1px solid rgba(245, 158, 11, 0.4); display: flex; align-items: center; justify-content: space-between; padding: 10px; border-radius: 12px; margin-bottom: 12px; box-shadow: 0 0 10px rgba(245, 158, 11, 0.15);">
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <span style="font-size: 1.3rem;">💔</span>
-            <div style="text-align: left;">
-              <div style="font-size: 0.8rem; font-weight: 700; color: #f59e0b;">Streak Broken!</div>
-              <div style="font-size: 0.7rem; color: var(--text-muted); line-height: 1.2;">Play Hangman to restore your streak of ${restorable.pastStreakValue} day${restorable.pastStreakValue > 1 ? 's' : ''}!</div>
-            </div>
-          </div>
-          <button class="btn btn-secondary btn-sm" id="btn-restore-streak" style="background: #f59e0b; color: #000; border: none; font-weight: 700; font-size: 0.75rem; padding: 4px 10px; border-radius: 6px; cursor: pointer;">Play</button>
-        </div>
-      `;
-      document.getElementById('btn-restore-streak')?.addEventListener('click', () => {
-        chrome.tabs.create({ url: chrome.runtime.getURL('hangman.html') });
-      });
-    } else {
-      restoreContainer.innerHTML = '';
-    }
-  }
 
-  // 1. Stats Bar
-  const streakDays = stats.streakDays || 1;
-  const isStreakMissed = !!restorable || (stats.streakDays <= 0);
+  // 1. Stats Bar (Day Streak Widget)
+  const streakDays = stats.streakDays || 0;
+  const completedToday = (stats.completedCount || 0) + (stats.waterGlasses || 0) + (stats.focusMinutesToday || 0);
+  const isDoneToday = completedToday > 0;
+  const isZeroStreak = streakDays <= 0;
 
   const streakVal = document.getElementById('stat-streak-val');
   const streakLbl = document.getElementById('stat-streak-label');
-  if (streakVal && streakLbl) {
-    streakVal.textContent = `${streakDays}🔥`;
-    streakLbl.textContent = streakDays > 1 ? 'Days Streak' : 'Day Streak';
+  const streakGroup = document.querySelector('.header-action-group');
 
-    if (isStreakMissed) {
-      streakVal.style.color = '#94a3b8';
-      streakVal.style.filter = 'grayscale(100%)';
-      streakVal.style.opacity = '0.6';
+  if (streakVal && streakLbl) {
+    streakLbl.textContent = streakDays === 1 ? 'Day Streak' : 'Days Streak';
+
+    if (restorable) {
+      streakVal.textContent = `${streakDays} 🔥 ❗`;
     } else {
-      streakVal.style.color = '#f59e0b';
-      streakVal.style.filter = 'none';
-      streakVal.style.opacity = '1';
+      streakVal.textContent = `${streakDays} 🔥`;
     }
-  } else {
-    const el = document.getElementById('stat-streak');
-    if (el) el.textContent = `${streakDays}🔥`;
+
+    if (streakGroup) {
+      streakGroup.removeAttribute('title'); // Prevent duplicate native browser tooltip
+
+      if (restorable) {
+        streakGroup.classList.add('is-inactive');
+        streakGroup.style.cursor = 'pointer';
+        streakGroup.setAttribute('data-tooltip', `⚠️ Yesterday's ${restorable.pastStreakValue}-Day Streak Broken!\nClick here to open Dashboard & play Hangman to restore!`);
+        streakGroup.onclick = () => {
+          if (typeof chrome !== 'undefined' && chrome.tabs) {
+            chrome.tabs.create({ url: chrome.runtime.getURL('dashboard/dashboard.html#tab-overview') });
+          }
+        };
+      } else {
+        streakGroup.onclick = null;
+        streakGroup.style.cursor = 'default';
+
+        if (isZeroStreak) {
+          // 0 Days Streak (Never completed or reset)
+          streakGroup.classList.add('is-inactive');
+          streakGroup.setAttribute('data-tooltip', `🔥 Streak: 0 Days (Inactive)\nComplete at least 1 reminder today to start your daily streak!`);
+        } else if (!isDoneToday) {
+          // Pending Today (Completed yesterday, but not today yet)
+          streakGroup.classList.add('is-inactive');
+          streakGroup.setAttribute('data-tooltip', `🔥 Streak: ${streakDays} Day${streakDays > 1 ? 's' : ''} (Pending Today)\nComplete 1 reminder today to ignite & advance your streak to ${streakDays + 1} Days!`);
+        } else {
+          // Active & Done Today
+          streakGroup.classList.remove('is-inactive');
+          streakGroup.setAttribute('data-tooltip', `🔥 Streak: ${streakDays} Day${streakDays > 1 ? 's' : ''} Active!\nGreat job! Keep completing daily reminders to maintain your streak!`);
+        }
+      }
+    }
   }
 
   // 2. Water Progress
@@ -372,7 +516,7 @@ async function refreshUI() {
   updateFocusWidget(focusState);
 
   // 4. Reminders List
-  renderRemindersList(reminders, settings);
+  renderRemindersList(reminders, settings, stats);
 
   // Re-check scroll arrow after list re-renders
   setTimeout(() => {
@@ -387,6 +531,8 @@ async function refreshUI() {
 
 function updateFocusWidget(focusState) {
   const widgetBox = document.getElementById('focus-widget-box');
+  const tabBar = document.getElementById('focus-tab-bar');
+  const tabStatus = document.getElementById('focus-tab-status');
   const label = document.getElementById('focus-status-label');
   const clock = document.getElementById('focus-timer-clock');
   const actionBtns = document.getElementById('focus-action-btns');
@@ -397,6 +543,22 @@ function updateFocusWidget(focusState) {
 
   const isFocusActive = focusState && focusState.active && (focusState.paused || (focusState.endTime && Date.now() < focusState.endTime));
 
+  // Focus widget is expanded when user unhides OR when a focus session is active
+  const shouldHideWidget = isFocusWidgetHidden && !isFocusActive;
+
+  if (shouldHideWidget) {
+    widgetBox.style.display = 'none';
+    if (tabBar) tabBar.style.display = 'flex';
+  } else {
+    widgetBox.style.display = 'flex';
+    if (tabBar) tabBar.style.display = 'none';
+  }
+
+  const hideBtn = document.getElementById('btn-hide-focus');
+  if (hideBtn) {
+    hideBtn.style.display = isFocusActive ? 'none' : 'block';
+  }
+
   if (isFocusActive) {
     widgetBox.classList.add('focus-widget-active');
 
@@ -406,14 +568,18 @@ function updateFocusWidget(focusState) {
       const totalSec = Math.floor(remainingMs / 1000);
       const mins = Math.floor(totalSec / 60);
       const secs = totalSec % 60;
-      clock.textContent = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+      const clockStr = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+      clock.textContent = clockStr;
+      if (tabStatus) tabStatus.textContent = `⏸️ ${clockStr}`;
 
       actionBtns.innerHTML = `
         <div style="display: flex; gap: 4px; width: 100%;">
+          <button class="btn btn-ghost btn-sm" id="btn-pin-focus" style="padding: 4px 8px; border: none; background: transparent; opacity: ${focusState.pinned !== false ? '1' : '0.45'}; font-size: 1.1rem;" title="${focusState.pinned !== false ? 'Unpin Clock' : 'Pin Clock'}">📌</button>
           <button class="btn btn-primary btn-sm" id="btn-resume-focus" style="flex: 1;">▶ Resume</button>
           <button class="btn btn-danger btn-sm" id="btn-stop-focus" style="flex: 1;">Stop</button>
         </div>
       `;
+      document.getElementById('btn-pin-focus')?.addEventListener('click', togglePinFocus);
       document.getElementById('btn-resume-focus')?.addEventListener('click', resumeFocus);
       document.getElementById('btn-stop-focus')?.addEventListener('click', stopFocus);
 
@@ -424,13 +590,20 @@ function updateFocusWidget(focusState) {
         const remainingMs = focusState.endTime - Date.now();
         if (remainingMs <= 0) {
           clearInterval(focusTimerInterval);
-          refreshUI();
+          if (typeof chrome !== 'undefined' && chrome.runtime) {
+            chrome.runtime.sendMessage({ action: 'COMPLETE_FOCUS_MODE' }, async () => {
+              showToast('🎉 Focus session completed!', 'success');
+              await refreshUI();
+            });
+          }
           return;
         }
         const totalSec = Math.floor(remainingMs / 1000);
         const mins = Math.floor(totalSec / 60);
         const secs = totalSec % 60;
-        clock.textContent = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+        const clockStr = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+        clock.textContent = clockStr;
+        if (tabStatus) tabStatus.textContent = `🔥 ${clockStr}`;
       };
 
       tick();
@@ -438,10 +611,12 @@ function updateFocusWidget(focusState) {
 
       actionBtns.innerHTML = `
         <div style="display: flex; gap: 4px; width: 100%;">
+          <button class="btn btn-ghost btn-sm" id="btn-pin-focus" style="padding: 4px 8px; border: none; background: transparent; opacity: ${focusState.pinned !== false ? '1' : '0.45'}; font-size: 1.1rem;" title="${focusState.pinned !== false ? 'Unpin Clock' : 'Pin Clock'}">📌</button>
           <button class="btn btn-secondary btn-sm" id="btn-pause-focus" style="flex: 1;">⏸ Pause</button>
           <button class="btn btn-danger btn-sm" id="btn-stop-focus" style="flex: 1;">Stop</button>
         </div>
       `;
+      document.getElementById('btn-pin-focus')?.addEventListener('click', togglePinFocus);
       document.getElementById('btn-pause-focus')?.addEventListener('click', pauseFocus);
       document.getElementById('btn-stop-focus')?.addEventListener('click', stopFocus);
     }
@@ -449,22 +624,21 @@ function updateFocusWidget(focusState) {
     widgetBox.classList.remove('focus-widget-active');
     label.textContent = 'Focus Mode Idle';
     clock.textContent = '25:00';
+    if (tabStatus) tabStatus.textContent = '25:00';
     actionBtns.innerHTML = `
-      <div id="row-focus-btns" style="display: flex; flex-direction: column; gap: 4px; min-width: 90px;">
+      <div id="row-focus-btns" style="display: flex; flex-direction: column; gap: 4px; min-width: 80px;">
         <button class="btn btn-primary btn-sm" id="btn-start-focus-25" style="width: 100%;">25m</button>
-        <button class="btn btn-secondary btn-sm" id="btn-start-focus-45" style="width: 100%;">45m</button>
         <button class="btn btn-ghost btn-sm" id="btn-show-custom-focus" style="width: 100%;">Custom</button>
       </div>
       <div id="box-custom-focus" style="display: none; flex-direction: column; gap: 4px; min-width: 90px;">
-        <input type="number" id="input-custom-focus" class="input-field" placeholder="Minutes" min="1" max="480" style="width: 100%; padding: 2px 6px; font-size: 0.75rem; height: 28px;">
+        <input type="number" id="input-custom-focus" class="input-field" placeholder="Mins (e.g. 45)" min="1" max="480" style="width: 100%; padding: 2px 6px; font-size: 0.75rem; height: 28px;">
         <div style="display: flex; gap: 4px; width: 100%;">
           <button class="btn btn-primary btn-sm" id="btn-start-custom-focus" style="flex: 1; height: 28px;">▶ Start</button>
-          <button class="btn btn-ghost btn-sm" id="btn-cancel-custom-focus" style="height: 28px; padding: 2px 6px;">✕</button>
+          <button class="btn btn-ghost btn-sm" id="btn-cancel-custom-focus" style="height: 28px; padding: 2px 8px; border: 1px solid var(--border);">✕</button>
         </div>
       </div>
     `;
     document.getElementById('btn-start-focus-25')?.addEventListener('click', () => startFocus(25));
-    document.getElementById('btn-start-focus-45')?.addEventListener('click', () => startFocus(45));
     document.getElementById('btn-show-custom-focus')?.addEventListener('click', () => {
       const btnRow = document.getElementById('row-focus-btns');
       const box = document.getElementById('box-custom-focus');
@@ -487,6 +661,13 @@ function updateFocusWidget(focusState) {
       }
     });
   }
+
+  document.getElementById('btn-hide-focus')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    isFocusWidgetHidden = true;
+    localStorage.setItem('reminderly_focus_hidden', 'true');
+    refreshUI();
+  });
 }
 
 async function startFocus(minutes) {
@@ -528,6 +709,14 @@ async function stopFocus() {
   }
 }
 
+async function togglePinFocus() {
+  if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+    chrome.runtime.sendMessage({ action: 'TOGGLE_PIN_FOCUS_CLOCK' }, async () => {
+      await refreshUI();
+    });
+  }
+}
+
 async function handleLogWaterClick() {
   const stats = await storage.getDailyStats();
   const settings = await storage.getSettings();
@@ -539,7 +728,7 @@ async function handleLogWaterClick() {
   promptEarlyLogConfirm(
     '💧',
     'Hydration Check',
-    'Did you just drink a glass of water or is this a test log? 😄',
+    'Did you just drink a glass of water? 💧',
     logWater
   );
 }
@@ -626,34 +815,148 @@ function promptEarlyLogConfirm(icon, title, msgText, onConfirmCallback) {
   btnCancel.addEventListener('click', handleCancel);
 }
 
-function renderRemindersList(reminders, settings) {
+function updatePopupHeaderTitle(reminders, settings) {
+  const sectionTitleEl = document.getElementById('popup-section-title') || document.querySelector('.section-title');
+  if (!sectionTitleEl) return;
+
+  const health = settings?.healthSettings || {};
+  const period = settings?.periodTracker || {};
+  const meds = health.medications || [];
+
+  const isHealthEnabled = 
+    health.waterEnabled !== false ||
+    health.eyeRestEnabled !== false ||
+    health.postureEnabled !== false ||
+    !!period.trackingEnabled ||
+    meds.length > 0 ||
+    reminders.some(r => r.enabled && (r.category === 'health' || r.category === 'water' || r.category === 'medicine' || r.id.startsWith('auto_health_') || r.id.startsWith('med_rem_')));
+
+  sectionTitleEl.textContent = isHealthEnabled ? 'Reminders & Health' : 'Reminders';
+}
+
+function renderRemindersList(reminders, settings, stats) {
   const container = document.getElementById('reminders-list-container');
   if (!container) return;
 
-  // Preserve water widget element so it scrolls with other items
-  const waterWidget = container.querySelector('.water-widget');
+  updatePopupHeaderTitle(reminders, settings);
   
   container.innerHTML = '';
   
-  if (waterWidget) {
-    container.appendChild(waterWidget);
-    const btnLog = document.getElementById('btn-log-water');
-    if (btnLog) btnLog.onclick = handleLogWaterClick;
-    const btnUnlog = document.getElementById('btn-unlog-water');
-    if (btnUnlog) btnUnlog.onclick = unlogWater;
-  }
-
-  const activeReminders = reminders.filter(r => r.enabled && r.id !== 'auto_health_water');
+  const isWaterEnabled = settings?.healthSettings?.waterEnabled !== false;
+  const isEyeEnabled = settings?.healthSettings?.eyeRestEnabled !== false;
+  const isPostureEnabled = settings?.healthSettings?.postureEnabled !== false;
+  const isPeriodEnabled = !!settings?.periodTracker?.trackingEnabled;
   const meds = settings?.healthSettings?.medications || [];
 
-  if (activeReminders.length === 0) {
+  const showHealthCard = (currentCategoryFilter === 'all' || currentCategoryFilter === 'health') && (currentTimeFilter === 'all' || currentTimeFilter === 'today');
+
+  // Filter active reminders based on settings & active category/time filters
+  let activeReminders = reminders.filter(r => {
+    if (!r.enabled) return false;
+    if (r.id === 'auto_health_water' || r.category === 'water') return isWaterEnabled;
+    if (r.id === 'auto_health_eye' || r.category === 'eye') return isEyeEnabled;
+    if (r.id === 'auto_health_posture' || r.category === 'posture') return isPostureEnabled;
+function parseLocalDate(dateStr) {
+  if (!dateStr) return new Date();
+  const parts = String(dateStr).split('-');
+  if (parts.length === 3) {
+    return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+  }
+  const d = new Date(dateStr);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+    if (r.id === 'auto_period_reminder' || r.isPeriodReminder || r.category === 'period') {
+      if (!isPeriodEnabled) return false;
+      const pc = settings?.periodTracker || {};
+      const profile = settings?.userProfile || {};
+      if (profile.gender !== 'female' || !pc.trackingEnabled || !pc.lastPeriodDate) return false;
+      const remindDays = pc.remindDaysBefore ?? 3;
+      const cycleLength = pc.cycleLength || 28;
+      const today = new Date(); today.setHours(0,0,0,0);
+      const last = parseLocalDate(pc.lastPeriodDate);
+      const daysSince = Math.floor((today - last) / 86400000);
+      const cyclesSince = Math.floor(daysSince / cycleLength);
+      const nextPeriod = new Date(last.getTime() + (cyclesSince + 1) * cycleLength * 86400000);
+      const diffDays = Math.ceil((nextPeriod.getTime() - today.getTime()) / 86400000);
+      if (diffDays > remindDays) return false;
+      return true;
+    }
+    return true;
+  });
+
+  if (isWaterEnabled && showHealthCard && !activeReminders.some(r => r.id === 'auto_health_water' || r.category === 'water')) {
+    const waterMins = settings?.healthSettings?.waterIntervalMinutes || settings?.waterIntervalMinutes || 60;
+    const nextWaterRem = reminders.find(r => r.category === 'water' || r.id === 'auto_health_water');
+    const waterTime = (nextWaterRem && nextWaterRem.time) ? nextWaterRem.time : Date.now() + waterMins * 60 * 1000;
+    activeReminders.push({
+      id: 'auto_health_water',
+      title: '💧 Hydration Break - Drink Water',
+      category: 'water',
+      priority: 'medium',
+      time: waterTime,
+      enabled: true
+    });
+  }
+
+  if (currentTimeFilter !== 'all') {
+    activeReminders = activeReminders.filter(rem => matchesTimeFilter(rem, currentTimeFilter));
+  }
+
+  if (currentCategoryFilter !== 'all') {
+    activeReminders = activeReminders.filter(rem => {
+      if (currentCategoryFilter === 'health') {
+        return rem.category === 'health' || rem.category === 'water' || rem.category === 'medicine' || rem.id.startsWith('auto_health_') || rem.id.startsWith('med_rem_');
+      } else if (currentCategoryFilter === 'custom') {
+        const standardCats = ['workout', 'study', 'meetings', 'reading', 'break', 'sleep', 'water', 'medicine', 'health'];
+        return !standardCats.includes(rem.category) && !rem.id.startsWith('auto_health_') && !rem.id.startsWith('med_rem_');
+      } else {
+        return rem.category === currentCategoryFilter;
+      }
+    });
+  }
+
+  // Sort by upcoming scheduled time (earliest first: 1 min before 3 min)
+  // Tie-breaker: If exact same time, sort by Priority descending (CRITICAL > HIGH > MEDIUM > LOW)
+  const PRIO_WEIGHTS = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1 };
+  activeReminders.sort((a, b) => {
+    const timeA = a.time || 0;
+    const timeB = b.time || 0;
+    if (timeA !== timeB) {
+      return timeA - timeB;
+    }
+    const pA = PRIO_WEIGHTS[a.priority?.toUpperCase()] || 2;
+    const pB = PRIO_WEIGHTS[b.priority?.toUpperCase()] || 2;
+    return pB - pA;
+  });
+
+  const hasAnyItems = activeReminders.length > 0;
+
+  if (!hasAnyItems) {
     const empty = document.createElement('div');
     empty.className = 'empty-state';
+    const isFiltered = currentCategoryFilter !== 'all' || currentTimeFilter !== 'today';
+    
+    let filterMsg = 'No active reminders scheduled for today.';
+    if (isFiltered) {
+      const parts = [];
+      if (currentTimeFilter !== 'today') parts.push(currentTimeFilter);
+      if (currentCategoryFilter !== 'all') parts.push(currentCategoryFilter);
+      filterMsg = `No reminders found matching filter (${parts.join(' & ')}).`;
+    }
+
     empty.innerHTML = `
-      <div class="empty-icon">✨</div>
-      <div>No active reminders scheduled.</div>
+      <div class="empty-icon">${isFiltered ? '🔍' : '✨'}</div>
+      <div>${filterMsg}</div>
+      ${isFiltered ? `<button class="btn btn-secondary btn-sm" id="btn-clear-filter-empty" style="margin-top: 8px; font-size: 0.75rem;">Clear Filters</button>` : ''}
     `;
     container.appendChild(empty);
+    if (isFiltered) {
+      document.getElementById('btn-clear-filter-empty')?.addEventListener('click', () => {
+        resetFilters();
+      });
+    }
     return;
   }
 
@@ -663,9 +966,65 @@ function renderRemindersList(reminders, settings) {
     const cleanTitle = rem.title ? rem.title.replace(/^💊\s*/, '') : '';
     const snoozeMins = settings?.defaultSnoozeMinutes || 10;
     const snoozeLabel = snoozeMins >= 60 ? (snoozeMins / 60) + 'h' : snoozeMins + 'm';
-    const snoozeBtnHtml = `<button class="btn btn-secondary btn-sm btn-snooze-action" data-id="${rem.id}" title="Snooze" style="padding: 2px 6px; font-size: 0.725rem; width: 100%;">⏰ ${snoozeLabel}</button>`;
+    // For period reminders: smart contextual "Remind in X days" instead of generic snooze
+    const isPeriodRem = rem.isPeriodReminder || rem.category === 'period';
+    const periodDaysLeft = isPeriodRem ? Math.max(1, Math.ceil((rem.time - Date.now()) / (1000 * 60 * 60 * 24))) : 0;
+    const periodRemindInDays = Math.max(1, Math.floor(periodDaysLeft / 2));
+    const periodRemindLabel = periodRemindInDays === 1 ? 'Remind Tomorrow 📅' : `Remind in ${periodRemindInDays}d 📅`;
+    const snoozeBtnHtml = isPeriodRem
+      ? `<button class="btn btn-secondary btn-sm btn-snooze-action" data-id="${rem.id}" data-period-remind-days="${periodRemindInDays}" title="Remind Later" style="padding: 2px 6px; font-size: 0.7rem; width: 100%; border-color: #ec489955;">${periodRemindLabel}</button>`
+      : `<button class="btn btn-secondary btn-sm btn-snooze-action" data-id="${rem.id}" title="Snooze" style="padding: 2px 6px; font-size: 0.725rem; width: 100%;">⏰ ${snoozeLabel}</button>`;
 
-    // Special Health Hub Item UI (Matching Water Tracker card layout)
+    // Dynamic Water Tracker Card
+    if (rem.id === 'auto_health_water' || rem.category === 'water') {
+      if (!isWaterEnabled || !showHealthCard) return;
+
+      const waterGlasses = stats?.waterGlasses || 0;
+      const waterGoal = settings?.healthSettings?.waterGoal || settings?.waterGoalGlasses || 8;
+      const isCompleted = waterGlasses >= waterGoal;
+
+      const countText = isCompleted 
+        ? `<span style="color: #10b981; font-weight: 700;">🎉 ${waterGlasses} / ${waterGoal} (Goal Met!)</span>`
+        : `${waterGlasses} / ${waterGoal} Glasses`;
+
+      const pct = isCompleted ? 100 : Math.min(100, Math.round((waterGlasses / waterGoal) * 100));
+      const fillBg = isCompleted ? 'background: linear-gradient(90deg, #10b981, #06b6d4);' : '';
+
+      const unlogStyle = waterGlasses > 0 ? '' : 'display: none;';
+      const logStyle = isCompleted ? 'display: none;' : '';
+
+      const item = document.createElement('div');
+      item.className = 'glass-card water-widget';
+      item.innerHTML = `
+        <div class="water-info">
+          <span class="water-icon">💧</span>
+          <div>
+            <div style="font-size: 0.825rem; font-weight: 700;">Water Tracker</div>
+            <div style="font-size: 0.725rem; color: var(--text-secondary);" id="water-count-label">${countText}</div>
+            <div class="water-progress-bar">
+              <div class="water-progress-fill" id="water-progress-fill" style="width: ${pct}%; ${fillBg}"></div>
+            </div>
+            <div style="font-size: 0.7rem; color: var(--text-secondary); margin-top: 4px;" id="popup-next-water-info">⏰ Next Water: <strong id="popup-next-water-time" style="color: #38bdf8;" class="live-countdown" data-timestamp="${rem.time}">${formatRelativeTime(rem.time)}</strong></div>
+          </div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 4px; align-items: stretch; justify-content: center;">
+          <div style="display: flex; gap: 4px; align-items: center; justify-content: flex-end;">
+            <button class="btn btn-ghost btn-sm" id="btn-unlog-water" title="Undo / -1 Glass" style="padding: 2px 6px; font-size: 0.75rem; border: 1px solid var(--border); ${unlogStyle}">-1</button>
+            <button class="btn btn-secondary btn-sm" id="btn-log-water" style="padding: 3px 8px; font-size: 0.75rem; ${logStyle}">+1 Glass</button>
+          </div>
+          <button class="btn btn-secondary btn-sm btn-snooze-action" id="btn-snooze-water" data-id="auto_health_water" title="Snooze" style="padding: 2px 6px; font-size: 0.725rem; width: 100%;">⏰ ${snoozeLabel}</button>
+        </div>
+      `;
+      container.appendChild(item);
+
+      const btnLog = item.querySelector('#btn-log-water');
+      if (btnLog) btnLog.onclick = handleLogWaterClick;
+      const btnUnlog = item.querySelector('#btn-unlog-water');
+      if (btnUnlog) btnUnlog.onclick = unlogWater;
+      return;
+    }
+
+    // Special Health Hub Item UI
     if (rem.id === 'auto_health_eye') {
       const item = document.createElement('div');
       item.className = 'glass-card water-widget';
@@ -673,8 +1032,8 @@ function renderRemindersList(reminders, settings) {
         <div class="water-info">
           <span class="water-icon">👀</span>
           <div>
-            <div style="font-size: 0.825rem; font-weight: 700;">Eye Rest (20-20-20 Rule)</div>
-            <div style="font-size: 0.725rem; color: var(--text-secondary);">Look 20ft away for 20s</div>
+            <div style="font-size: 0.825rem; font-weight: 700;">Eye Rest</div>
+            <div style="font-size: 0.725rem; color: var(--text-secondary);">Look 20ft away for 20 seconds 👀</div>
             <div style="font-size: 0.7rem; color: var(--text-secondary); margin-top: 4px;">⏰ Next Eye Rest: <strong style="color: #38bdf8;" class="live-countdown" data-timestamp="${rem.time}">${formatRelativeTime(rem.time)}</strong></div>
           </div>
         </div>
@@ -747,14 +1106,28 @@ function renderRemindersList(reminders, settings) {
     }
 
     // Standard Custom Reminder Card
-    const doneBtnHtml = `<button class="btn btn-secondary btn-sm btn-done-action" data-id="${rem.id}" style="padding: 2px 8px; font-size: 0.75rem; width: 100%;">Done ✓</button>`;
+    const isPeriodCard = rem.isPeriodReminder || rem.category === 'period' || rem.id === 'auto_period_reminder';
+    const doneBtnHtml = `<button class="btn btn-secondary btn-sm btn-done-action" data-id="${rem.id}" style="padding: 6px 12px; font-size: 0.775rem; width: 100%;">${isPeriodCard ? 'Got It 👍' : 'Done ✓'}</button>`;
 
     const item = document.createElement('div');
     item.className = 'glass-card reminder-item';
     item.style.flexDirection = 'column';
     item.style.alignItems = 'stretch';
 
-    item.innerHTML = `
+    item.innerHTML = isPeriodCard ? `
+      <div class="reminder-main">
+        <div class="reminder-icon">${cat.icon}</div>
+        <div class="reminder-details">
+          <div class="reminder-item-title">${escapeHTML(cleanTitle)}</div>
+          <div class="reminder-item-meta" style="font-size: 0.7rem; color: var(--text-secondary); margin-top: 2px;">
+            ⏰ Next Reminder: <strong style="color: #38bdf8;" class="live-countdown" data-timestamp="${rem.time}">${formatRelativeTime(rem.time)}</strong>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top: 10px;">
+        ${doneBtnHtml}
+      </div>
+    ` : `
       <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
         <div class="reminder-main">
           <div class="reminder-icon">${cat.icon}</div>
@@ -843,8 +1216,12 @@ function renderRemindersList(reminders, settings) {
   container.querySelectorAll('.btn-snooze-action').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       const id = e.currentTarget.dataset.id;
+      const periodRemindDays = e.currentTarget.dataset.periodRemindDays;
+      const minutes = periodRemindDays
+        ? parseInt(periodRemindDays, 10) * 24 * 60  // smart remind-later for period
+        : (settings?.defaultSnoozeMinutes || 10);
       if (typeof chrome !== 'undefined' && chrome.runtime) {
-        chrome.runtime.sendMessage({ action: 'SNOOZE_REMINDER', id: id, minutes: 10 }, async () => {
+        chrome.runtime.sendMessage({ action: 'SNOOZE_REMINDER', id: id, minutes }, async () => {
           await refreshUI();
         });
       }
@@ -855,28 +1232,57 @@ function renderRemindersList(reminders, settings) {
 async function populateQuickAddCategories() {
   popCustomCategories = await storage.getCustomCategories();
   const selectElem = document.getElementById('new-rem-category');
-  if (!selectElem) return;
+  const filterCatElem = document.getElementById('filter-select-category');
 
-  const defaultOptions = [
-    { value: 'workout', label: '🏋️ Workout' },
-    { value: 'study', label: '📚 Study' },
-    { value: 'meetings', label: '📅 Meetings' },
-    { value: 'reading', label: '📖 Reading' },
-    { value: 'break', label: '☕ Break' },
-    { value: 'sleep', label: '🌙 Sleep' }
-  ];
+  if (selectElem) {
+    const defaultOptions = [
+      { value: 'workout', label: '🏋️ Workout' },
+      { value: 'study', label: '📚 Study' },
+      { value: 'meetings', label: '📅 Meetings' },
+      { value: 'reading', label: '📖 Reading' },
+      { value: 'break', label: '☕ Break' },
+      { value: 'sleep', label: '🌙 Sleep' }
+    ];
 
-  const currentVal = selectElem.value;
-  let html = defaultOptions.map(o => `<option value="${o.value}">${o.label}</option>`).join('');
+    const currentVal = selectElem.value;
+    let html = `<option value="" disabled ${!currentVal ? 'selected' : ''}>Select Category</option>`;
+    html += defaultOptions.map(o => `<option value="${o.value}">${o.label}</option>`).join('');
 
-  popCustomCategories.forEach(c => {
-    html += `<option value="${c.id}">${c.icon ? c.icon + ' ' : ''}${escapeHTML(c.label)}</option>`;
-  });
+    popCustomCategories.forEach(c => {
+      html += `<option value="${c.id}">${c.icon ? c.icon + ' ' : ''}${escapeHTML(c.label)}</option>`;
+    });
 
-  html += `<option value="new_custom">Other...</option>`;
-  selectElem.innerHTML = html;
-  if (currentVal && selectElem.querySelector(`option[value="${currentVal}"]`)) {
-    selectElem.value = currentVal;
+    html += `<option value="new_custom">Other...</option>`;
+    selectElem.innerHTML = html;
+    if (currentVal && selectElem.querySelector(`option[value="${currentVal}"]`)) {
+      selectElem.value = currentVal;
+    } else if (!currentVal) {
+      selectElem.value = '';
+    }
+  }
+
+  if (filterCatElem) {
+    const currentFilterVal = filterCatElem.value || 'all';
+    const defaultFilterOptions = [
+      { value: 'all', label: 'All Categories' },
+      { value: 'health', label: '🩺 Health Hub' },
+      { value: 'workout', label: '🏋️ Workout' },
+      { value: 'study', label: '📚 Study' },
+      { value: 'meetings', label: '📅 Meetings' },
+      { value: 'reading', label: '📖 Reading' },
+      { value: 'break', label: '☕ Break' },
+      { value: 'sleep', label: '🌙 Sleep' },
+      { value: 'custom', label: 'Custom' }
+    ];
+
+    let filterHtml = defaultFilterOptions.map(o => `<option value="${o.value}">${o.label}</option>`).join('');
+    popCustomCategories.forEach(c => {
+      filterHtml += `<option value="${c.id}">${c.icon ? c.icon + ' ' : ''}${escapeHTML(c.label)}</option>`;
+    });
+    filterCatElem.innerHTML = filterHtml;
+    if (currentFilterVal && filterCatElem.querySelector(`option[value="${currentFilterVal}"]`)) {
+      filterCatElem.value = currentFilterVal;
+    }
   }
 }
 
@@ -1018,11 +1424,17 @@ async function saveNewReminder() {
     scheduledTimestamp = Date.now() + intervalHrs * 3600 * 1000;
   }
 
-  let category = document.getElementById('new-rem-category').value;
+  const catInput = document.getElementById('new-rem-category');
+  let category = catInput ? catInput.value : '';
+  if (!category) {
+    highlightPopFieldError(catInput, 'Please select a category!');
+    return;
+  }
+
   const customName = document.getElementById('new-rem-custom-name')?.value.trim();
   const customEmoji = document.getElementById('new-rem-custom-emoji')?.value.trim() || '';
 
-  if (category === 'new_custom' || category === 'custom' || customName || customEmoji) {
+  if (category === 'new_custom' || customName || customEmoji) {
     const finalLabel = customName || 'General';
     const finalEmoji = customEmoji ? (Array.from(customEmoji)[0] || '🔔') : '🔔';
     const savedCat = await storage.saveCustomCategory({ label: finalLabel, icon: finalEmoji });
@@ -1033,11 +1445,14 @@ async function saveNewReminder() {
   }
 
   const priority = document.getElementById('new-rem-priority').value;
+  const notesInput = document.getElementById('new-rem-notes');
+  const notes = notesInput ? notesInput.value.trim() : '';
 
   const newRem = {
     id: generateId(),
     title: title,
-    description: `Scheduled via Quick Add`,
+    description: notes || `Scheduled via Quick Add`,
+    notes: notes,
     category: category,
     priority: priority,
     repeat: repeat,
@@ -1056,7 +1471,9 @@ async function saveNewReminder() {
     chrome.runtime.sendMessage({ action: 'REFRESH_ALARMS' });
   }
 
-  document.getElementById('new-rem-title').value = '';
+  if (titleInput) titleInput.value = '';
+  if (notesInput) notesInput.value = '';
+  if (catInput) catInput.value = '';
   document.getElementById('quick-add-modal').classList.remove('active');
   showToast('Reminder saved successfully! 🎉', 'success');
   await refreshUI();
