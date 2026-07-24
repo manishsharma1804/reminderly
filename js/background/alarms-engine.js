@@ -349,8 +349,36 @@ async function deliverReminder(reminder, activeTab, settings) {
   }
 }
 
-function showSystemNotification(reminder) {
+export async function playBackgroundAudio(soundTone = 'chime', volume = 100) {
+  try {
+    if (typeof chrome !== 'undefined' && chrome.offscreen) {
+      const hasDoc = await chrome.offscreen.hasDocument();
+      if (!hasDoc) {
+        await chrome.offscreen.createDocument({
+          url: 'offscreen/offscreen.html',
+          reasons: ['AUDIO_PLAYBACK'],
+          justification: 'Play reminder sound chime for system notifications'
+        });
+      }
+      chrome.runtime.sendMessage({
+        action: 'PLAY_BACKGROUND_SOUND',
+        soundTone,
+        volume
+      }).catch(() => {});
+    }
+  } catch (e) {
+    console.error('Failed to play offscreen background audio:', e);
+  }
+}
+
+async function showSystemNotification(reminder) {
   if (typeof chrome === 'undefined' || !chrome.notifications) return;
+
+  const settings = await storage.getSettings();
+  if (settings.soundEnabled !== false) {
+    playBackgroundAudio(settings.soundTone, settings.volume);
+  }
+
   const iconUrl = (typeof chrome.runtime !== 'undefined' && chrome.runtime.getURL)
     ? chrome.runtime.getURL('icons/128x128.png')
     : 'icons/128x128.png';
@@ -360,7 +388,8 @@ function showSystemNotification(reminder) {
     ? [{ title: 'Got it 👍' }]
     : [{ title: 'Done' }, { title: 'Snooze 10m' }];
 
-  chrome.notifications.create(reminder.id, {
+  const notifId = `${reminder.id}::${Date.now()}`;
+  chrome.notifications.create(notifId, {
     type: 'basic',
     iconUrl: iconUrl,
     title: `${reminder.title}`,

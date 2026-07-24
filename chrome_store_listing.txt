@@ -81,6 +81,10 @@ Justification:
 Justification:
 "Required to allow content scripts to render the floating Remi assistant overlay and distracting website blocker modals on user-navigated web pages."
 
+[ Permission: offscreen ]
+Justification:
+"Required to host a background audio playback document to reliably play reminder sound chimes for system notifications when users are on internal browser pages (chrome://newtab) or when Google Chrome is minimized."
+
 
 --------------------------------------------------------------------------------
 5. DATA PRIVACY & SECURITY JUSTIFICATIONS

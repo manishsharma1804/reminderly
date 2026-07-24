@@ -30,7 +30,8 @@
     "tabs",
     "activeTab",
     "scripting",
-    "webNavigation"
+    "webNavigation",
+    "offscreen"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -64,7 +65,8 @@
         "css/*",
         "js/*",
         "dashboard/*",
-        "remi/*"
+        "remi/*",
+        "offscreen/*"
       ],
       "matches": [
         "<all_urls>"

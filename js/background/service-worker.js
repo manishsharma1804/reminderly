@@ -70,11 +70,12 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 // Notification Button Handler
 if (chrome.notifications) {
   chrome.notifications.onButtonClicked.addListener(async (notificationId, buttonIndex) => {
+    const originalRemId = notificationId.includes('::') ? notificationId.split('::')[0] : notificationId;
     const reminders = await storage.getReminders();
-    const reminder = reminders.find(r => r.id === notificationId);
+    const reminder = reminders.find(r => r.id === originalRemId || r.id === notificationId);
     if (buttonIndex === 0) {
       // Done / "Got it 🩸"
-      await markReminderDone(notificationId);
+      await markReminderDone(originalRemId);
     } else if (buttonIndex === 1) {
       // Snooze / Remind later
       const settings = await storage.getSettings();
@@ -86,7 +87,7 @@ if (chrome.notifications) {
         const remindInDays = Math.max(1, Math.floor(daysLeft / 2));
         snoozeMinutes = remindInDays * 24 * 60;
       }
-      await snoozeReminder(notificationId, snoozeMinutes);
+      await snoozeReminder(originalRemId, snoozeMinutes);
     }
     chrome.notifications.clear(notificationId);
   });
